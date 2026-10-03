@@ -39,6 +39,8 @@ GET /v0/resource/plugins/cpa-codex-catalog/models
 Codex accepts a remote catalog URL through `model_catalog_url` on its provider configuration.
 Point it to the resource route and configure the provider's normal API key through `env_key`.
 Codex uses that provider authentication when it fetches the catalog.
+Enable `api_key_model_discovery` when the Codex version requires the feature gate for API-key providers.
+This flag was required by the tested Codex CLI 0.160.0 binary.
 If `bearer_token_env` is set in the plugin configuration, use the same environment variable name for `env_key`.
 When configured, the route accepts only an exact `Authorization: Bearer <token>` value and rejects other requests with HTTP 401.
 Without `bearer_token_env`, the route is public to clients that can reach the CLIProxyAPI listener.
@@ -47,6 +49,9 @@ Keep the token value in the environment or a secret manager, not in either confi
 ```toml
 model = "example-model"
 model_provider = "example"
+
+[features]
+api_key_model_discovery = true
 
 [model_providers.example]
 name = "Example"

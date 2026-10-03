@@ -29,3 +29,13 @@ Test concurrent reads and reconfiguration with synthetic catalogs.
 Load the native artifact in an isolated CLIProxyAPI host and request the resource route.
 Run formatting, race tests, vet, and native builds on the supported Go toolchain.
 Review the published pull request independently before merging.
+
+## Progress
+
+- Implemented the native resource route, metadata overrides, validated reloads, and private local export.
+- Validated known nested metadata against the current Codex types while preserving unknown fields.
+- Passed formatting, race tests, vet, and native builds on Go 1.26.8.
+- Passed native host integration for bearer protection, metadata overrides, and wrapper removal.
+- Confirmed authenticated remote catalog consumption and rich metadata preservation with Codex CLI 0.160.0.
+- Completed independent review and focused blocker reassessment with no remaining blockers.
+- Ready for pull request integration into `main`.
