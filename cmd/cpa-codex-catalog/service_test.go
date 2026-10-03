@@ -22,7 +22,7 @@ func TestCatalogResourceAndRegistration(t *testing.T) {
 		t.Fatalf("unconfigured response = (%+v, %v)", response, err)
 	}
 	catalogPath := writeTestCatalog(t, "first")
-	if err := service.configure(append(configYAML(catalogPath, nil, ""), []byte("priority: 0\n")...)); err != nil {
+	if err := service.configure(configYAML(catalogPath, nil, "")); err != nil {
 		t.Fatalf("configure() error = %v", err)
 	}
 	registration := service.registerManagement()
