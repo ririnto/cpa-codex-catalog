@@ -1,0 +1,8 @@
+/build/
+/.runtime/
+/plugins/
+*.so
+*.dylib
+*.dll
+*.test
+.DS_Store
