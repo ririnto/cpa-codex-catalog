@@ -4,7 +4,8 @@
 
 - Treat catalog files, prompt text, and provider credentials as user data.
 - Use synthetic fixtures and examples.
-- Do not read or publish live Codex caches, local Codex configuration, or secrets.
+- Access live catalogs and local configuration only within the user's authorized operator scope.
+- Keep operator data and secrets out of publications.
 - Never write Codex global configuration from this repository.
 - Treat served model metadata as visible to every client that can reach the route.
 - Configure bearer authentication when access must be restricted.
@@ -12,7 +13,6 @@
 
 ## Implementation
 
-- Keep catalog behavior aligned with `docs/engineering-contracts.md`.
 - Keep the native plugin compatible with the CLIProxyAPI SDK release pinned in `go.mod`.
 - Use the existing Taskfile and `go tool task`.
 - Do not add another task runner.
