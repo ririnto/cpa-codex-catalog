@@ -1,5 +1,6 @@
-# Enable the native plugin after placing a catalog at the configured path.
+# Replace the base path with an existing read-only Codex models_cache.json or full catalog.
 # Relative paths resolve from the CLIProxyAPI process working directory.
+# Keep operator-owned changes in the partial override file.
 plugins:
   enabled: true
   dir: "plugins"
@@ -7,7 +8,7 @@ plugins:
     cpa-codex-catalog:
       enabled: true
       priority: 1
-      catalog_path: "./data/models.json"
+      catalog_path: "/path/to/existing/models_cache.json"
       overrides_path: "./data/overrides.json"
       # Set this to an environment variable name when the resource needs bearer authentication.
       # The same variable name belongs in Codex provider `env_key`.
