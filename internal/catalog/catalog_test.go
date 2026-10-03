@@ -89,6 +89,13 @@ func TestBuildRejectsMalformedInputsAndPatches(t *testing.T) {
 		{name: "invalid enum", base: base, overrides: []byte(`{"defaults":{"shell_type":"remote_shell"}}`)},
 		{name: "invalid context bounds", base: base, overrides: []byte(`{"defaults":{"context_window":200000,"max_context_window":100000}}`)},
 		{name: "invalid nested prompt type", base: base, overrides: []byte(`{"defaults":{"model_messages":{"instructions_template":7}}}`)},
+		{name: "invalid nested tool message", base: base, overrides: []byte(`{"defaults":{"model_messages":{"tools":{"multi_agent":{"spawn_agent":7}}}}}`)},
+		{name: "invalid nested instructions variable", base: base, overrides: []byte(`{"defaults":{"model_messages":{"instructions_variables":{"personality_default":7}}}}`)},
+		{name: "incomplete token budget", base: base, overrides: []byte(`{"defaults":{"model_messages":{"token_budget":{}}}}`)},
+		{name: "invalid guardian policy mode type", base: base, overrides: []byte(`{"defaults":{"guardian":{"shell":7}}}`)},
+		{name: "invalid access program entry type", base: base, overrides: []byte(`{"defaults":{"available_access_programs":{"cyber":[7]}}}`)},
+		{name: "invalid upgrade model type", base: base, overrides: []byte(`{"defaults":{"upgrade":{"model":7,"migration_markdown":""}}}`)},
+		{name: "invalid guardian transcript sources", base: base, overrides: []byte(`{"defaults":{"model_messages":{"guardian_v2":{"transcript":{"sources":[7]}}}}}`)},
 		{name: "missing instruction template", base: baseWithModels(modelWithoutInstructions), overrides: []byte(`{}`)},
 		{name: "duplicate model slugs", base: baseWithModels(syntheticModel("alpha"), syntheticModel("alpha")), overrides: []byte(`{}`)},
 		{name: "trailing JSON value", base: base, overrides: []byte(`{} {}`)},
@@ -99,6 +106,42 @@ func TestBuildRejectsMalformedInputsAndPatches(t *testing.T) {
 				t.Fatal("Build() succeeded, want validation error")
 			}
 		})
+	}
+}
+
+func TestBuildAcceptsPartialTypedMetadataAndPreservesUnknownFields(t *testing.T) {
+	model := syntheticModel("alpha")
+	model["guardian"] = map[string]any{}
+	model["available_access_programs"] = map[string]any{"cyber": []any{}}
+	model["upgrade"] = map[string]any{"model": "upgrade-target", "migration_markdown": ""}
+	modelMessages := model["model_messages"].(map[string]any)
+	modelMessages["tools"] = map[string]any{}
+	modelMessages["permissions"] = map[string]any{}
+	modelMessages["guardian_v2"] = map[string]any{}
+	modelMessages["future_message_group"] = map[string]any{"future_value": []any{1, true}}
+	base, err := json.Marshal(map[string]any{"cache_revision": "synthetic", "models": []map[string]any{model}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Build(base, []byte(`{"defaults":{"model_messages":{"tools":{"multi_agent":{"spawn_agent":{"description":"Partial override"}}}}}}`))
+	if err != nil {
+		t.Fatalf("Build() rejected valid partial metadata: %v", err)
+	}
+	var response map[string]any
+	if err := json.Unmarshal(got, &response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response) != 1 {
+		t.Fatalf("response wrapper fields = %v, want only models", keys(response))
+	}
+	resultModel := response["models"].([]any)[0].(map[string]any)
+	message := resultModel["model_messages"].(map[string]any)
+	tool := message["tools"].(map[string]any)["multi_agent"].(map[string]any)["spawn_agent"].(map[string]any)
+	if tool["description"] != "Partial override" {
+		t.Fatalf("partial ToolMessage = %#v", tool)
+	}
+	if _, ok := message["future_message_group"]; !ok {
+		t.Fatal("unknown nested metadata was not preserved")
 	}
 }
 

@@ -293,10 +293,13 @@ func validateModel(model object) error {
 	if err := validateOptionalString(model, "description"); err != nil {
 		return err
 	}
-	for _, field := range []string{"default_reasoning_level", "default_service_tier", "comp_hash", "model_specialty", "auto_review_model_override", "base_instructions", "multi_agent_reasoning_effort"} {
+	for _, field := range []string{"default_reasoning_level", "default_service_tier", "comp_hash", "model_specialty", "auto_review_model_override", "base_instructions"} {
 		if err := validateOptionalString(model, field); err != nil {
 			return err
 		}
+	}
+	if err := validateOptionalReasoningEffort(model, "multi_agent_reasoning_effort"); err != nil {
+		return err
 	}
 	for _, field := range []string{"context_window", "max_context_window", "auto_compact_token_limit"} {
 		if err := validateOptionalPositiveInt(model, field); err != nil {
@@ -334,10 +337,14 @@ func validateModel(model object) error {
 			return err
 		}
 	}
-	for _, field := range []string{"guardian", "available_access_programs", "upgrade", "model_messages"} {
-		if err := validateOptionalObject(model, field); err != nil {
-			return err
-		}
+	if err := validateOptionalObjectValue(model, "guardian", validateGuardianPolicy); err != nil {
+		return err
+	}
+	if err := validateOptionalObjectValue(model, "available_access_programs", validateAccessPrograms); err != nil {
+		return err
+	}
+	if err := validateOptionalObjectValue(model, "upgrade", validateUpgrade); err != nil {
+		return err
 	}
 	if value, present := model["availability_nux"]; present && value != nil {
 		if err := validateMessageObject(value, "availability_nux"); err != nil {
@@ -349,10 +356,8 @@ func validateModel(model object) error {
 			return err
 		}
 	}
-	if value, present := model["model_messages"]; present && value != nil {
-		if err := validateModelMessages(value); err != nil {
-			return err
-		}
+	if err := validateOptionalObjectValue(model, "model_messages", validateModelMessages); err != nil {
+		return err
 	}
 	if !hasInstructionTemplate(model) {
 		return errors.New("model requires model_messages.instructions_template or legacy base_instructions")
@@ -381,7 +386,7 @@ func validateReasoningLevels(model object) error {
 			return errors.New("supported_reasoning_levels entries must be objects")
 		}
 		effort, ok := level["effort"].(string)
-		if !ok || strings.TrimSpace(effort) == "" {
+		if !ok || effort == "" {
 			return errors.New("reasoning effort must be a non-empty string")
 		}
 		if _, duplicate := seen[effort]; duplicate {
@@ -394,7 +399,7 @@ func validateReasoningLevels(model object) error {
 	}
 	if value, present := model["default_reasoning_level"]; present && value != nil {
 		defaultEffort, ok := value.(string)
-		if !ok || strings.TrimSpace(defaultEffort) == "" {
+		if !ok || defaultEffort == "" {
 			return errors.New("default_reasoning_level must be a non-empty string or null")
 		}
 		if _, supported := seen[defaultEffort]; !supported {
@@ -439,20 +444,311 @@ func validateServiceTiers(value any) error {
 	return nil
 }
 
-func validateModelMessages(value any) error {
-	messages, ok := value.(object)
-	if !ok {
-		return errors.New("model_messages must be an object")
-	}
+func validateModelMessages(messages object) error {
 	for _, field := range []string{"content_filter_guidance", "persistent_instructions", "instructions_template"} {
 		if err := validateOptionalString(messages, field); err != nil {
-			return fmt.Errorf("model_messages.%s must be a string or null", field)
+			return fmt.Errorf("model_messages.%w", err)
 		}
 	}
-	for _, field := range []string{"tools", "instructions_variables", "approvals", "collaboration_modes", "auto_review", "permissions", "multi_agent", "token_budget", "guardian_v2", "confirmation_policies"} {
-		if err := validateOptionalObject(messages, field); err != nil {
-			return fmt.Errorf("model_messages.%s must be an object or null", field)
+	validators := []struct {
+		field    string
+		validate func(object) error
+	}{
+		{field: "tools", validate: validateToolMessages},
+		{field: "instructions_variables", validate: validateInstructionsVariables},
+		{field: "approvals", validate: validateApprovalMessages},
+		{field: "collaboration_modes", validate: validateCollaborationModeMessages},
+		{field: "auto_review", validate: validateAutoReviewMessages},
+		{field: "permissions", validate: validatePermissionMessages},
+		{field: "multi_agent", validate: validateMultiAgentMessages},
+		{field: "token_budget", validate: validateTokenBudget},
+		{field: "guardian_v2", validate: validateGuardianV2},
+		{field: "confirmation_policies", validate: validateConfirmationPolicies},
+	}
+	for _, validator := range validators {
+		if err := validateOptionalObjectValue(messages, validator.field, validator.validate); err != nil {
+			return fmt.Errorf("model_messages.%w", err)
 		}
+	}
+	return nil
+}
+
+func validateGuardianPolicy(policy object) error {
+	for _, field := range []string{"computer_use", "shell", "file_changes", "mcp", "network", "permissions"} {
+		if err := validateOptionalString(policy, field); err != nil {
+			return fmt.Errorf("guardian.%w", err)
+		}
+	}
+	for _, field := range []string{"other_tools", "unscored_action"} {
+		if raw, present := policy[field]; present {
+			if _, ok := raw.(string); !ok {
+				return fmt.Errorf("guardian.%s must be a string", field)
+			}
+		}
+	}
+	if err := validateNullableBoolFields(policy, "initial_cua_call", "sandboxed_exec_commands"); err != nil {
+		return fmt.Errorf("guardian.%w", err)
+	}
+	return nil
+}
+
+func validateAccessPrograms(programs object) error {
+	if err := requireArray(programs, "cyber"); err != nil {
+		return fmt.Errorf("available_access_programs.%w", err)
+	}
+	if err := validateStringArray("cyber", programs["cyber"]); err != nil {
+		return fmt.Errorf("available_access_programs.%w", err)
+	}
+	return nil
+}
+
+func validateUpgrade(upgrade object) error {
+	for _, field := range []string{"model", "migration_markdown"} {
+		if err := requireString(upgrade, field); err != nil {
+			return fmt.Errorf("upgrade.%w", err)
+		}
+	}
+	return nil
+}
+
+func validateToolMessages(tools object) error {
+	if err := validateOptionalObjectValue(tools, "indirect_description_prefixes", validateIndirectDescriptionPrefixes); err != nil {
+		return fmt.Errorf("tools.%w", err)
+	}
+	if err := validateOptionalObjectValue(tools, "send_user_message_async", validateToolMessage); err != nil {
+		return fmt.Errorf("tools.%w", err)
+	}
+	if err := validateOptionalObjectValue(tools, "multi_agent", validateMultiAgentToolMessages); err != nil {
+		return fmt.Errorf("tools.%w", err)
+	}
+	if err := validateOptionalObjectValue(tools, "code_mode", validateCodeModeToolMessages); err != nil {
+		return fmt.Errorf("tools.%w", err)
+	}
+	if err := validateOptionalObjectValue(tools, "mcp_resources", validateMcpResourceToolMessages); err != nil {
+		return fmt.Errorf("tools.%w", err)
+	}
+	return nil
+}
+
+func validateIndirectDescriptionPrefixes(prefixes object) error {
+	for _, field := range []string{"namespaces", "mcp_servers"} {
+		raw, present := prefixes[field]
+		if !present || raw == nil {
+			continue
+		}
+		values, ok := raw.(object)
+		if !ok {
+			return fmt.Errorf("indirect_description_prefixes.%s must be an object or null", field)
+		}
+		for _, value := range values {
+			if _, ok := value.(string); !ok {
+				return fmt.Errorf("indirect_description_prefixes.%s values must be strings", field)
+			}
+		}
+	}
+	return nil
+}
+
+func validateToolMessage(message object) error {
+	if err := validateOptionalStringFields(message, "description", "parameters"); err != nil {
+		return fmt.Errorf("tool message.%w", err)
+	}
+	return nil
+}
+
+func validateMultiAgentToolMessages(messages object) error {
+	for _, field := range []string{"spawn_agent", "send_message", "followup_task", "wait_agent", "interrupt_agent", "list_agents", "create_channel", "get_channels", "list_threads", "search_posts", "read_thread", "read_post", "subscribe", "unsubscribe", "post"} {
+		if err := validateOptionalObjectValue(messages, field, validateToolMessage); err != nil {
+			return fmt.Errorf("multi_agent.%w", err)
+		}
+	}
+	return nil
+}
+
+func validateCodeModeToolMessages(messages object) error {
+	for _, field := range []string{"exec", "wait"} {
+		if err := validateOptionalObjectValue(messages, field, validateToolMessage); err != nil {
+			return fmt.Errorf("code_mode.%w", err)
+		}
+	}
+	return validateOptionalStringFields(messages, "deferred_nested_tools_guidance", "mcp_typescript_preamble")
+}
+
+func validateMcpResourceToolMessages(messages object) error {
+	for _, field := range []string{"list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource"} {
+		if err := validateOptionalObjectValue(messages, field, validateToolMessage); err != nil {
+			return fmt.Errorf("mcp_resources.%w", err)
+		}
+	}
+	return nil
+}
+
+func validateInstructionsVariables(variables object) error {
+	return validateOptionalStringFields(variables, "personality_default", "personality_friendly", "personality_pragmatic")
+}
+
+func validateApprovalMessages(messages object) error {
+	return validateOptionalStringFields(messages, "on_request", "on_request_auto_review", "never", "unless_trusted")
+}
+
+func validateCollaborationModeMessages(messages object) error {
+	return validateOptionalStringFields(messages, "default", "plan")
+}
+
+func validateAutoReviewMessages(messages object) error {
+	return validateOptionalStringFields(messages, "policy", "policy_template", "node_repl_policy", "rejection_instructions", "timeout_instructions")
+}
+
+func validatePermissionMessages(messages object) error {
+	return validateOptionalStringFields(messages, "danger_full_access", "workspace_write", "read_only")
+}
+
+func validateMultiAgentMessages(messages object) error {
+	if err := validateOptionalObjectValue(messages, "role", validateMultiAgentRoleMessages); err != nil {
+		return fmt.Errorf("multi_agent.%w", err)
+	}
+	if err := validateOptionalObjectValue(messages, "mode", validateMultiAgentModeMessages); err != nil {
+		return fmt.Errorf("multi_agent.%w", err)
+	}
+	return nil
+}
+
+func validateMultiAgentRoleMessages(messages object) error {
+	return validateOptionalStringFields(messages, "root", "subagent")
+}
+
+func validateMultiAgentModeMessages(messages object) error {
+	return validateOptionalStringFields(messages, "explicit", "proactive", "hint_text")
+}
+
+func validateTokenBudget(budget object) error {
+	if err := validateOptionalBool(budget, "enabled"); err != nil {
+		return fmt.Errorf("token_budget.%w", err)
+	}
+	if err := validateOptionalBool(budget, "use_history_notes_extension"); err != nil {
+		return fmt.Errorf("token_budget.%w", err)
+	}
+	for _, field := range []string{"reminder_threshold_tokens", "auto_compact_fallback_buffer_tokens"} {
+		if err := requireInt(budget, field, 64); err != nil {
+			return fmt.Errorf("token_budget.%w", err)
+		}
+	}
+	for _, field := range []string{"reminder_message_template", "guidance_message", "auto_compact_fallback_prompt"} {
+		if err := requireString(budget, field); err != nil {
+			return fmt.Errorf("token_budget.%w", err)
+		}
+	}
+	return nil
+}
+
+func validateGuardianV2(config object) error {
+	if err := validateEnum(config, "async_classifier_mode", false, true, "snapshot", "conversation"); err != nil {
+		return fmt.Errorf("guardian_v2.%w", err)
+	}
+	if err := validateOptionalString(config, "classifier_instructions"); err != nil {
+		return fmt.Errorf("guardian_v2.%w", err)
+	}
+	if err := validateOptionalReasoningEffort(config, "reasoning_effort"); err != nil {
+		return fmt.Errorf("guardian_v2.%w", err)
+	}
+	for _, field := range []string{"async_classifier_conversation_token_limit", "max_tool_call_lag", "max_action_tokens", "max_classifier_instruction_tokens", "max_parent_compaction_tokens"} {
+		if err := validateOptionalUnsignedInt(config, field, 64); err != nil {
+			return fmt.Errorf("guardian_v2.%w", err)
+		}
+	}
+	if err := validateOptionalUnsignedInt(config, "review_threshold_basis_points", 16); err != nil {
+		return fmt.Errorf("guardian_v2.%w", err)
+	}
+	if err := validateNullableBoolFields(config, "reuse_parent_compaction"); err != nil {
+		return fmt.Errorf("guardian_v2.%w", err)
+	}
+	if err := validateOptionalObjectValue(config, "transcript", validateGuardianV2Transcript); err != nil {
+		return fmt.Errorf("guardian_v2.%w", err)
+	}
+	return nil
+}
+
+func validateGuardianV2Transcript(transcript object) error {
+	if sources, present := transcript["sources"]; present && sources != nil {
+		if err := validateStringArray("sources", sources); err != nil {
+			return fmt.Errorf("transcript.%w", err)
+		}
+	}
+	if err := validateNullableBoolFields(transcript, "include_images"); err != nil {
+		return fmt.Errorf("transcript.%w", err)
+	}
+	for _, field := range []string{"max_message_entry_tokens", "max_tool_entry_tokens", "max_message_transcript_tokens", "max_tool_transcript_tokens", "max_recent_non_user_entries"} {
+		if err := validateOptionalUnsignedInt(transcript, field, 64); err != nil {
+			return fmt.Errorf("transcript.%w", err)
+		}
+	}
+	return nil
+}
+
+func validateConfirmationPolicies(policies object) error {
+	return validateOptionalStringFields(policies, "browser_use", "computer_use")
+}
+
+func validateOptionalObjectValue(value object, field string, validate func(object) error) error {
+	raw, present := value[field]
+	if !present || raw == nil {
+		return nil
+	}
+	nested, ok := raw.(object)
+	if !ok {
+		return fmt.Errorf("%s must be an object or null", field)
+	}
+	if err := validate(nested); err != nil {
+		return fmt.Errorf("%s.%w", field, err)
+	}
+	return nil
+}
+
+func validateOptionalStringFields(value object, fields ...string) error {
+	for _, field := range fields {
+		if err := validateOptionalString(value, field); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateOptionalReasoningEffort(value object, field string) error {
+	raw, present := value[field]
+	if !present || raw == nil {
+		return nil
+	}
+	effort, ok := raw.(string)
+	if !ok || effort == "" {
+		return fmt.Errorf("%s must be a non-empty string or null", field)
+	}
+	return nil
+}
+
+func validateNullableBoolFields(value object, fields ...string) error {
+	for _, field := range fields {
+		raw, present := value[field]
+		if !present || raw == nil {
+			continue
+		}
+		if _, ok := raw.(bool); !ok {
+			return fmt.Errorf("%s must be a boolean or null", field)
+		}
+	}
+	return nil
+}
+
+func validateOptionalUnsignedInt(value object, field string, bits int) error {
+	raw, present := value[field]
+	if !present || raw == nil {
+		return nil
+	}
+	number, ok := raw.(json.Number)
+	if !ok {
+		return fmt.Errorf("%s must be an unsigned integer or null", field)
+	}
+	if _, err := strconv.ParseUint(string(number), 10, bits); err != nil {
+		return fmt.Errorf("%s must be an unsigned integer or null", field)
 	}
 	return nil
 }
@@ -551,17 +847,6 @@ func validateOptionalBool(value object, field string) error {
 	}
 	if _, ok := raw.(bool); !ok {
 		return fmt.Errorf("%s must be a boolean", field)
-	}
-	return nil
-}
-
-func validateOptionalObject(value object, field string) error {
-	raw, present := value[field]
-	if !present || raw == nil {
-		return nil
-	}
-	if _, ok := raw.(object); !ok {
-		return fmt.Errorf("%s must be an object or null", field)
 	}
 	return nil
 }
