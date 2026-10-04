@@ -8,10 +8,12 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -184,7 +186,69 @@ func TestNativeHostCodexCatalogResource(t *testing.T) {
 	})
 }
 
-func startProxy(t *testing.T, binary, catalogPath, overridesPath string) string {
+func TestNativeHostAvailableModelsIntersection(t *testing.T) {
+	binary := os.Getenv("CPA_BINARY")
+	if binary == "" {
+		t.Skip("set CPA_BINARY to a built CLIProxyAPI v8 server for native host integration")
+	}
+	const availableTokenEnv = "CPA_CODEX_CATALOG_AVAILABLE_TEST_TOKEN"
+	const availableToken = "fixture-available-models-token"
+	var inventoryRequests atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		inventoryRequests.Add(1)
+		if request.Method != http.MethodGet || request.URL.Path != "/v1/models" {
+			t.Errorf("inventory request = %s %s, want GET /v1/models", request.Method, request.URL.Path)
+		}
+		if request.Header.Get("Authorization") != "Bearer "+availableToken {
+			t.Errorf("inventory Authorization = %q", request.Header.Get("Authorization"))
+			http.Error(writer, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		_, _ = writer.Write([]byte(`{"object":"list","data":[{"id":"codex-fixture-model","object":"model","owned_by":"fixture"},{"id":"unknown-provider-model","object":"model","owned_by":"fixture"},{"id":"codex-fixture-model","object":"model","owned_by":"fixture"}]}`))
+	}))
+	defer upstream.Close()
+	fixtureDir, err := os.MkdirTemp("", "cpa-codex-catalog-availability-integration-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(fixtureDir) })
+	catalogPath := filepath.Join(fixtureDir, "catalog.json")
+	if err := os.WriteFile(catalogPath, []byte(catalogFixture), 0600); err != nil {
+		t.Fatal(err)
+	}
+	overridesPath := filepath.Join(fixtureDir, "overrides.json")
+	if err := os.WriteFile(overridesPath, []byte(overridesFixture), 0600); err != nil {
+		t.Fatal(err)
+	}
+	base := startProxy(t, binary, catalogPath, overridesPath, availabilityConfig{url: upstream.URL + "/v1/models", tokenEnv: availableTokenEnv, token: availableToken})
+	status, body, _ := getResource(t, base, resourceBearer)
+	if status != http.StatusOK {
+		t.Fatalf("resource status = %d, want 200: %s", status, body)
+	}
+	var result map[string]any
+	if err := json.Unmarshal(body, &result); err != nil {
+		t.Fatalf("decode filtered catalog: %v", err)
+	}
+	models, ok := result["models"].([]any)
+	if !ok || len(models) != 1 {
+		t.Fatalf("filtered models = %#v, want one exact matching model", result["models"])
+	}
+	model := models[0].(map[string]any)
+	if model["slug"] != "codex-fixture-model" || model["display_name"] != "Overridden <Codex> & metadata" || model["supports_search_tool"] != true {
+		t.Fatalf("filtered model lost merged metadata: %#v", model)
+	}
+	if inventoryRequests.Load() == 0 {
+		t.Fatal("native host did not request the configured inventory")
+	}
+}
+
+type availabilityConfig struct {
+	url      string
+	tokenEnv string
+	token    string
+}
+
+func startProxy(t *testing.T, binary, catalogPath, overridesPath string, availability ...availabilityConfig) string {
 	t.Helper()
 	root := t.TempDir()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -216,6 +280,12 @@ func startProxy(t *testing.T, binary, catalogPath, overridesPath string) string 
 		t.Fatal(err)
 	}
 	config := fmt.Sprintf("config-version: 8\nserver:\n  host: 127.0.0.1\n  port: %d\nmanagement:\n  disable-control-panel: true\naccess:\n  api-keys: [fixture-client-key]\noauth:\n  auth-dir: %q\nplugins:\n  enabled: true\n  dir: %q\n  configs:\n    cpa-codex-catalog:\n      enabled: true\n      catalog_path: %q\n      overrides_path: %q\n      bearer_token_env: %q\n", port, authDir, filepath.Join(root, "plugins"), catalogPath, overridesPath, resourceBearerEnv)
+	if len(availability) > 1 {
+		t.Fatal("startProxy accepts at most one availability configuration")
+	}
+	if len(availability) == 1 {
+		config += fmt.Sprintf("      available_models_url: %q\n      available_models_token_env: %q\n", availability[0].url, availability[0].tokenEnv)
+	}
 	configPath := filepath.Join(root, "config.yaml")
 	if err := os.WriteFile(configPath, []byte(config), 0600); err != nil {
 		t.Fatal(err)
@@ -229,6 +299,9 @@ func startProxy(t *testing.T, binary, catalogPath, overridesPath string) string 
 	command := exec.CommandContext(ctx, binary, "--config", configPath, "--local-model")
 	command.Dir = root
 	command.Env = append(os.Environ(), resourceBearerEnv+"="+resourceBearer)
+	if len(availability) == 1 {
+		command.Env = append(command.Env, availability[0].tokenEnv+"="+availability[0].token)
+	}
 	command.Stdout = logFile
 	command.Stderr = logFile
 	if err := command.Start(); err != nil {
