@@ -47,7 +47,7 @@ import (
 
 const maxRequestBytes = 2 << 20
 
-var pluginVersion = "0.1.0"
+var pluginVersion = "0.1.2"
 var service pluginService
 
 type lifecycleRequest struct {
@@ -150,6 +150,8 @@ func currentRegistration() registration {
 				{Name: "catalog_path", Type: pluginapi.ConfigFieldTypeString, Description: "Required when enabled. Path to the base Codex model catalog, relative to the plugin process working directory when not absolute."},
 				{Name: "overrides_path", Type: pluginapi.ConfigFieldTypeString, Description: "Optional overrides JSON path, relative to the plugin process working directory when not absolute."},
 				{Name: "bearer_token_env", Type: pluginapi.ConfigFieldTypeString, Description: "Optional environment variable name for bearer protection of the resource."},
+				{Name: "available_models_url", Type: pluginapi.ConfigFieldTypeString, Description: "Optional authenticated host /v1/models URL for filtering catalog membership."},
+				{Name: "available_models_token_env", Type: pluginapi.ConfigFieldTypeString, Description: "Optional environment variable name for the model inventory bearer token."},
 			},
 		},
 	}

@@ -23,22 +23,63 @@ var envNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 var bearerTokenPattern = regexp.MustCompile(`^[A-Za-z0-9._~+/-]+=*$`)
 
 type pluginService struct {
-	current atomic.Pointer[serviceSnapshot]
+	current          atomic.Pointer[serviceSnapshot]
+	availabilityHTTP *http.Client
 }
 
 type serviceSnapshot struct {
-	enabled    bool
-	catalog    []byte
-	bearerHash [32]byte
-	protected  bool
+	enabled                 bool
+	catalog                 []byte
+	bearerHash              [32]byte
+	protected               bool
+	availableModelsURL      string
+	availableModelsTokenEnv string
 }
 
 type configFile struct {
-	Enabled        *bool  `yaml:"enabled"`
-	Priority       int    `yaml:"priority"`
-	CatalogPath    string `yaml:"catalog_path"`
-	OverridesPath  string `yaml:"overrides_path"`
-	BearerTokenEnv string `yaml:"bearer_token_env"`
+	Enabled                 *bool  `yaml:"enabled"`
+	Priority                int    `yaml:"priority"`
+	CatalogPath             string `yaml:"catalog_path"`
+	OverridesPath           string `yaml:"overrides_path"`
+	BearerTokenEnv          string `yaml:"bearer_token_env"`
+	AvailableModelsURL      string `yaml:"available_models_url"`
+	AvailableModelsTokenEnv string `yaml:"available_models_token_env"`
+}
+
+var defaultAvailabilityHTTPClient = createAvailabilityHTTPClient(nil)
+
+func newPluginService(transport http.RoundTripper) *pluginService {
+	if transport == nil {
+		return &pluginService{availabilityHTTP: defaultAvailabilityHTTPClient}
+	}
+	return &pluginService{availabilityHTTP: createAvailabilityHTTPClient(transport)}
+}
+
+func createAvailabilityHTTPClient(transport http.RoundTripper) *http.Client {
+	if transport == nil {
+		if defaultTransport, ok := http.DefaultTransport.(*http.Transport); ok {
+			transport = defaultTransport.Clone()
+		} else {
+			transport = &http.Transport{}
+		}
+		if defaultTransport, ok := transport.(*http.Transport); ok {
+			defaultTransport.Proxy = nil
+			defaultTransport.ResponseHeaderTimeout = 0
+		}
+	}
+	return &http.Client{
+		Transport: transport,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+}
+
+func (s *pluginService) availabilityClient() *http.Client {
+	if s.availabilityHTTP != nil {
+		return s.availabilityHTTP
+	}
+	return defaultAvailabilityHTTPClient
 }
 
 func (s *pluginService) configure(raw []byte) error {
@@ -55,11 +96,22 @@ func (s *pluginService) configure(raw []byte) error {
 		if strings.TrimSpace(config.CatalogPath) == "" {
 			return errors.New("invalid plugin configuration")
 		}
+		if config.AvailableModelsURL != "" && validateAvailableModelsURL(config.AvailableModelsURL) != nil {
+			return errors.New("invalid plugin configuration")
+		}
+		if config.AvailableModelsTokenEnv != "" && !envNamePattern.MatchString(config.AvailableModelsTokenEnv) {
+			return errors.New("invalid plugin configuration")
+		}
+		if config.AvailableModelsURL == "" && config.AvailableModelsTokenEnv != "" {
+			return errors.New("invalid plugin configuration")
+		}
 		catalogBytes, errLoad := catalog.Load(config.CatalogPath, config.OverridesPath)
 		if errLoad != nil {
 			return errors.New("invalid plugin configuration")
 		}
 		snapshot.catalog = append([]byte(nil), catalogBytes...)
+		snapshot.availableModelsURL = config.AvailableModelsURL
+		snapshot.availableModelsTokenEnv = config.AvailableModelsTokenEnv
 		if config.BearerTokenEnv != "" {
 			if !envNamePattern.MatchString(config.BearerTokenEnv) {
 				return errors.New("invalid plugin configuration")
@@ -88,6 +140,9 @@ func parseConfig(raw []byte) (configFile, error) {
 		return configFile{}, errors.New("multiple configuration documents")
 	}
 	if config.BearerTokenEnv != strings.TrimSpace(config.BearerTokenEnv) {
+		return configFile{}, errors.New("invalid environment variable name")
+	}
+	if config.AvailableModelsTokenEnv != strings.TrimSpace(config.AvailableModelsTokenEnv) {
 		return configFile{}, errors.New("invalid environment variable name")
 	}
 	return config, nil
@@ -122,10 +177,22 @@ func (s *pluginService) handleManagement(request pluginapi.ManagementRequest) (p
 	if snapshot.protected && !authorized(request.Headers, snapshot.bearerHash) {
 		return jsonResponse(http.StatusUnauthorized, "authorization required", http.Header{"Www-Authenticate": []string{"Bearer"}}), nil
 	}
+	body := snapshot.catalog
+	if snapshot.availableModelsURL != "" {
+		availability, err := fetchAvailableModels(s.availabilityClient(), snapshot.availableModelsURL, snapshot.availableModelsTokenEnv)
+		if err != nil {
+			return jsonResponse(http.StatusServiceUnavailable, "model availability unavailable", nil), nil
+		}
+		filtered, err := catalog.IntersectAvailableModels(snapshot.catalog, availability)
+		if err != nil {
+			return jsonResponse(http.StatusServiceUnavailable, "model availability unavailable", nil), nil
+		}
+		body = filtered
+	}
 	return pluginapi.ManagementResponse{
 		StatusCode: http.StatusOK,
 		Headers:    http.Header{"Content-Type": []string{"application/json; charset=utf-8"}, "Cache-Control": []string{"no-store"}},
-		Body:       append([]byte(nil), snapshot.catalog...),
+		Body:       append([]byte(nil), body...),
 	}, nil
 }
 
