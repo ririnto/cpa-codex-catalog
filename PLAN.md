@@ -3,7 +3,8 @@
 ## Outcome
 
 Serve full Codex model metadata through a CLIProxyAPI native resource route.
-Preserve base metadata and apply explicit per-model overrides for capabilities, reasoning, context, and prompts.
+Use an existing cache or catalog as a read-only base and apply only sparse operator-authored overrides.
+Return the full merged model response required by Codex while keeping the override file partial.
 Provide a local export option for Codex installations that support `model_catalog_json`.
 
 ## Scope
@@ -18,12 +19,15 @@ Private publication, focused issue tracking, pull request review, and merging in
 
 Main owns repository setup, dependencies, docs, integration, commits, publication, and merge.
 The catalog engine and native adapter have separate writers.
-The working branch is `codex/catalog-customization` and the target branch is `main`.
+The current follow-up is documentation-only and does not change source code or tests.
+The working branch is `codex/partial-catalog-workflow` and the target branch is `main`.
 Use named branches and release tags for durable references.
 
 ## Acceptance
 
-Validate full catalog fields against the current Codex schema and keep explicit values unchanged.
+Load an existing read-only `models_cache.json` wrapper or full catalog and preserve unspecified metadata.
+Validate partial overrides against the current Codex schema and keep explicit values unchanged.
+Return the full merged `{ "models": [...] }` response from the resource route.
 Reject malformed inputs, duplicate model IDs, unsafe model overrides, and invalid model capability values.
 Test concurrent reads and reconfiguration with synthetic catalogs.
 Load the native artifact in an isolated CLIProxyAPI host and request the resource route.
@@ -38,4 +42,5 @@ Review the published pull request independently before merging.
 - Passed native host integration for bearer protection, metadata overrides, and wrapper removal.
 - Confirmed authenticated remote catalog consumption and rich metadata preservation with Codex CLI 0.160.0.
 - Completed independent review and focused blocker reassessment with no remaining blockers.
-- Ready for pull request integration into `main`.
+- Merged the initial implementation into `main`.
+- The current branch documents the read-only base and partial-override workflow.

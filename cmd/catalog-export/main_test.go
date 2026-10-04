@@ -64,6 +64,99 @@ func TestExportForceReplacesAndHidesInputErrors(t *testing.T) {
 	}
 }
 
+func TestExportForceRejectsInputAliases(t *testing.T) {
+	tests := []struct {
+		name       string
+		outputPath func(t *testing.T, directory, basePath, overridesPath string) string
+	}{
+		{
+			name: "base path",
+			outputPath: func(_ *testing.T, _, basePath, _ string) string {
+				return basePath
+			},
+		},
+		{
+			name: "relative base path",
+			outputPath: func(t *testing.T, _, basePath, _ string) string {
+				workingDirectory, err := os.Getwd()
+				if err != nil {
+					t.Fatal(err)
+				}
+				relativePath, err := filepath.Rel(workingDirectory, basePath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return relativePath
+			},
+		},
+		{
+			name: "base symlink",
+			outputPath: func(t *testing.T, directory, basePath, _ string) string {
+				aliasPath := filepath.Join(directory, "base-alias.json")
+				if err := os.Symlink(basePath, aliasPath); err != nil {
+					t.Skipf("symlinks are unavailable: %v", err)
+				}
+				return aliasPath
+			},
+		},
+		{
+			name: "base hard link",
+			outputPath: func(t *testing.T, directory, basePath, _ string) string {
+				aliasPath := filepath.Join(directory, "base-alias.json")
+				if err := os.Link(basePath, aliasPath); err != nil {
+					t.Skipf("hard links are unavailable: %v", err)
+				}
+				return aliasPath
+			},
+		},
+		{
+			name: "overrides path",
+			outputPath: func(_ *testing.T, _, _, overridesPath string) string {
+				return overridesPath
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			directory := t.TempDir()
+			basePath := filepath.Join(directory, "base.json")
+			overridesPath := filepath.Join(directory, "overrides.json")
+			baseData := []byte(testCatalog)
+			overridesData := []byte(`{"models":{"demo":{"display_name":"Updated"}}}`)
+			if err := os.WriteFile(basePath, baseData, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(overridesPath, overridesData, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			outputPath := test.outputPath(t, directory, basePath, overridesPath)
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			args := []string{"--base", basePath, "--overrides", overridesPath, "--out", outputPath, "--force"}
+			if code := run(args, &stdout, &stderr); code == 0 {
+				t.Fatal("forced export accepted an output path that aliases an input")
+			}
+			if !strings.Contains(stderr.String(), "catalog export failed") || strings.Contains(stderr.String(), basePath) || strings.Contains(stderr.String(), overridesPath) || strings.Contains(stderr.String(), outputPath) {
+				t.Fatalf("error output exposed a path or omitted the generic error: %q", stderr.String())
+			}
+			actualBase, err := os.ReadFile(basePath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(actualBase, baseData) {
+				t.Fatal("forced export changed the base catalog")
+			}
+			actualOverrides, err := os.ReadFile(overridesPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(actualOverrides, overridesData) {
+				t.Fatal("forced export changed the override file")
+			}
+		})
+	}
+}
+
 func TestExportRequiresExplicitBaseAndOutput(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

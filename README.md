@@ -28,6 +28,9 @@ The host and plugin must use the same operating system and architecture.
 Enable the plugin in CLIProxyAPI configuration and set `catalog_path` to a readable JSON catalog.
 Use `config.example.yaml` as a starting point and provide local catalog files before enabling the plugin.
 Relative catalog paths resolve from the CLIProxyAPI process working directory.
+Point `catalog_path` to an existing `models_cache.json` or full catalog and keep that source file read-only.
+Operators normally maintain only the partial JSON patch named by `overrides_path`.
+The plugin loads both inputs during configuration or reconfiguration and never rewrites either input file.
 The native plugin runs inside the CLIProxyAPI process, so install only builds you trust.
 
 The plugin serves the catalog at:
@@ -70,29 +73,25 @@ Codex defines `model_catalog_url` for a remote catalog while keeping inference r
 ## Catalog and overrides
 
 The plugin instance defaults to enabled when the host loads native plugins.
-`catalog_path` is required and accepts a full `{ "models": [...] }` catalog or the supported Codex cache wrapper as its base.
+`catalog_path` is required and accepts an existing `models_cache.json` cache wrapper or a full `{ "models": [...] }` catalog.
 `overrides_path` is optional and points to a JSON object with optional `defaults` and `models` maps.
 Defaults apply to each source model before any matching slug override.
 Object fields merge recursively, and arrays replace the base array.
 Unknown model slugs and duplicate source slugs fail configuration.
 See [engineering contracts](docs/engineering-contracts.md) for reload, fallback, and metadata limits.
 
-The catalog is authoritative for this resource route.
-The plugin does not add missing models from CLIProxyAPI's bundled model list.
+The resource route returns the full merged `{ "models": [...] }` catalog that Codex expects at `model_catalog_url`.
+The override file remains a partial patch, and the plugin does not add missing models from CLIProxyAPI's bundled model list.
+The base cache or catalog is read-only, and reconfiguration is required to load changed inputs.
 
-A metadata override file can set reasoning choices and prompt text for a source model.
-The following example uses a synthetic model slug.
+A metadata override file contains only the fields that need changes.
+This partial example uses a synthetic model slug.
 
 ```json
 {
   "models": {
     "example-model": {
       "display_name": "Example Coding Model",
-      "default_reasoning_level": "high",
-      "supported_reasoning_levels": [
-        {"effort": "low", "description": "Light reasoning"},
-        {"effort": "high", "description": "Detailed reasoning"}
-      ],
       "model_messages": {
         "instructions_template": "Complete the requested code change and verify its behavior."
       }
@@ -104,20 +103,22 @@ The following example uses a synthetic model slug.
 Use values that the model and your Codex version support.
 This route supplies an authoritative full catalog to Codex and replaces its bundled catalog fallback.
 
-## Local export
+## Optional local export
 
-The `catalog-export` command builds an offline Codex catalog from explicit input paths.
+Use `catalog-export` only when a Codex client needs a local `model_catalog_json` file instead of a remote catalog URL.
+The command builds a complete offline Codex catalog from an existing base and a partial override file.
 It refuses to replace an existing output unless you pass `--force`.
 
 ```sh
 go run ./cmd/catalog-export \
-  --base "$TMPDIR/base.json" \
+  --base "/path/to/existing/models_cache.json" \
   --overrides "$TMPDIR/overrides.json" \
   --out "$TMPDIR/models.json"
 ```
 
 Omit `--overrides` when no override file is needed.
-Use an explicit output path and review it before configuring Codex to use it.
+The command writes the merged result to the explicit output path and leaves both inputs unchanged.
+Review that full output before configuring Codex to use it.
 The command does not read or modify Codex's global configuration.
 
 ## Verification
