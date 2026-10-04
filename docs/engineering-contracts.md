@@ -13,6 +13,35 @@ Apply defaults first and the matching slug override second.
 Merge nested objects by key, and replace arrays as complete values.
 Reject duplicate source slugs and override slugs that do not exist in the base catalog.
 
+## Available model intersection
+
+Fetch `available_models_url` for each resource request when configured.
+Require the URL path to equal `/v1/models`.
+Allow HTTPS.
+Allow HTTP only for `localhost` or a loopback IP.
+Reject URL userinfo, fragments, redirects, and case-insensitive `client_version` query keys.
+Preserve other query parameters.
+Validate the environment variable name during configuration.
+Read the bearer token named by `available_models_token_env` from the environment on each request.
+Return a fixed HTTP 503 response for missing or invalid tokens, malformed inventory, or fetch errors.
+Do not expose upstream response bodies, request URLs, or credentials in errors.
+Enforce a fixed response-size limit before decoding inventory.
+The resource API provides no cancellation context.
+Inventory requests have no post-connect timeout.
+
+Parse provider rows from `data[]` and require string `id` fields.
+Accept a missing provider `supported_in_api` flag, exclude `false`, and reject other flag types.
+Keep a catalog model only when its slug exactly matches a provider ID and its `supported_in_api` value is true.
+Match IDs case-sensitively, collapse duplicate provider IDs, and ignore unknown IDs.
+Preserve source catalog order and all merged catalog fields.
+Do not add provider fields or models to the catalog.
+Return HTTP 200 with an empty catalog when valid inventory has no eligible models.
+Never serve stale inventory or the unfiltered catalog after an error.
+
+Treat generic CLIProxyAPI `/v1/models` output as host-routable inventory, not per-provider entitlement.
+Use provider-filtered discovery when account-specific availability is required.
+Do not infer entitlements for providers without authoritative discovery.
+
 An override changes only the fields it names.
 Preserve other source fields, including prompt metadata, without rewriting their contents.
 Preserved unknown or legacy fields are not guaranteed to affect Codex behavior.
@@ -27,7 +56,8 @@ Resource requests read one snapshot and do not observe a partial update.
 If a candidate is invalid, retain the last valid active snapshot.
 
 The resource route is `GET /v0/resource/plugins/cpa-codex-catalog/models`.
-Return the full Codex catalog response from this route.
+Return the full merged catalog unless availability filtering is configured.
+Apply the exact provider-ID intersection after merging catalog overrides.
 The standard CLIProxyAPI `/v1/models` response is a separate API surface with its own fields.
 CLIProxyAPI Home mode currently returns 404 for this plugin resource route.
 
@@ -51,7 +81,7 @@ Store the token value outside repository files and never include it in logs or d
 
 `catalog_path` is required when the plugin is enabled.
 Resolve relative catalog and override paths from the CLIProxyAPI host process working directory.
-`overrides_path` and `bearer_token_env` are optional.
+`overrides_path`, `bearer_token_env`, `available_models_url`, and `available_models_token_env` are optional.
 
 ## Local export
 

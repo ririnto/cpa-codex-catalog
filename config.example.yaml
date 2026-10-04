@@ -10,6 +10,11 @@ plugins:
       priority: 1
       catalog_path: "/path/to/existing/models_cache.json"
       overrides_path: "./data/overrides.json"
+      # Optionally filter the merged catalog through a CLIProxyAPI /v1/models endpoint.
+      # Use HTTPS except for localhost or a loopback IP.
+      # available_models_url: "http://127.0.0.1:8317/v1/models"
+      # Read the bearer token from this environment variable for each inventory request.
+      # available_models_token_env: "CLIPROXY_MODELS_TOKEN"
       # Set this to an environment variable name when the resource needs bearer authentication.
       # The same variable name belongs in Codex provider `env_key`.
       # bearer_token_env: "CODEX_CATALOG_TOKEN"

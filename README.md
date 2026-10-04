@@ -1,6 +1,6 @@
 # Codex Model Catalog for CLIProxyAPI
 
-This native CLIProxyAPI plugin serves the full Codex model catalog from an HTTP resource route.
+This native CLIProxyAPI plugin serves a merged Codex model catalog through an HTTP resource route.
 It preserves source metadata and applies explicit JSON overrides without editing Codex's global configuration.
 
 ## Requirements
@@ -80,9 +80,35 @@ Object fields merge recursively, and arrays replace the base array.
 Unknown model slugs and duplicate source slugs fail configuration.
 See [engineering contracts](docs/engineering-contracts.md) for reload, fallback, and metadata limits.
 
-The resource route returns the full merged `{ "models": [...] }` catalog that Codex expects at `model_catalog_url`.
+The resource route returns the full merged `{ "models": [...] }` catalog when availability filtering is unset.
 The override file remains a partial patch, and the plugin does not add missing models from CLIProxyAPI's bundled model list.
 The base cache or catalog is read-only, and reconfiguration is required to load changed inputs.
+
+## Available model filtering
+
+Set `available_models_url` to filter the merged catalog against a CLIProxyAPI `/v1/models` endpoint.
+The plugin matches catalog slugs to provider `data[].id` values by exact, case-sensitive string equality.
+Codex catalog entries require `supported_in_api=true`.
+Provider rows need a string `id`.
+A missing provider `supported_in_api` flag is accepted, and explicit `false` excludes the row.
+Malformed provider rows return HTTP 503.
+The result preserves catalog order and metadata.
+Unknown provider IDs add no entries.
+The plugin fetches the inventory for each resource request and never serves stale or unfiltered results after a failure.
+A successful empty intersection returns HTTP 200 with `{ "models": [] }`.
+An inventory error returns HTTP 503 with a fixed message.
+
+Set `available_models_token_env` to an environment variable name for outbound bearer authentication.
+The plugin reads and validates that token for each inventory request.
+This setting authenticates the inventory lookup.
+`bearer_token_env` protects the plugin resource route.
+Use HTTPS except for `localhost` or a loopback IP.
+The plugin rejects redirects, URL credentials, fragments, and `client_version` query keys.
+Errors omit upstream bodies, request URLs, and token values.
+
+The filter reflects only its configured inventory and cannot infer every provider's account entitlement.
+Copilot Bridge applies policy, picker, capability, and endpoint filters before publishing its model inventory.
+Other providers need their own authoritative discovery endpoint for account-specific availability.
 
 A metadata override file contains only the fields that need changes.
 This partial example uses a synthetic model slug.
@@ -101,7 +127,7 @@ This partial example uses a synthetic model slug.
 ```
 
 Use values that the model and your Codex version support.
-This route supplies an authoritative full catalog to Codex and replaces its bundled catalog fallback.
+This route supplies Codex's catalog and replaces its bundled catalog fallback.
 
 ## Optional local export
 

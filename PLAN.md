@@ -17,10 +17,10 @@ Private publication, focused issue tracking, pull request review, and merging in
 
 ## Ownership and Delivery
 
-Main owns repository setup, dependencies, docs, integration, commits, publication, and merge.
-The catalog engine and native adapter have separate writers.
-The current follow-up is documentation-only and does not change source code or tests.
-The working branch is `codex/partial-catalog-workflow` and the target branch is `main`.
+Main owns the plan, configuration, commits, publication, and merge.
+One implementation owner maintains the catalog engine, native adapter, and integration tests for this unit.
+The documentation owner maintains operator examples and runtime contracts.
+The working branch is `codex/available-model-intersection` and the target branch is `main`.
 Use named branches and release tags for durable references.
 
 ## Acceptance
@@ -43,4 +43,29 @@ Review the published pull request independently before merging.
 - Confirmed authenticated remote catalog consumption and rich metadata preservation with Codex CLI 0.160.0.
 - Completed independent review and focused blocker reassessment with no remaining blockers.
 - Merged the initial implementation into `main`.
-- The current branch documents the read-only base and partial-override workflow.
+- Documented the read-only base and partial-override workflow.
+- Released export input-alias protection in `v0.1.1` after independent review.
+
+## Available Model Intersection
+
+Filter merged metadata against an authenticated model ID endpoint when configured.
+Use the host's ordinary OpenAI-compatible model list without a Codex client-version query.
+Preserve exact matching slugs, source order, defaults, overrides, and remaining field values.
+Exclude metadata marked unsupported for API access.
+Return an empty catalog for a valid empty inventory.
+Return a safe error when inventory retrieval or validation fails.
+Do not fall back to stale or unfiltered metadata.
+Keep inventory bodies and credential values outside storage and logs.
+The host inventory describes routed models and does not prove every provider's live entitlement.
+Provider-specific discovery owns account policy and capability validation.
+Verify focused intersection, transport, resource, and native host cases before publishing.
+Main verifies isolated authenticated catalog consumption against the filtered host inventory.
+
+## Current Acceptance
+
+Passed Go 1.26.8 formatting checks, package race tests, vet, and native shared-library build.
+Passed native host resource authentication, metadata overrides, and authenticated inventory intersection tests.
+Confirmed the isolated authenticated resource preserves merged metadata while filtering by exact host model IDs.
+Confirmed Codex consumes the filtered catalog and preserves every supplied metadata field.
+Codex adds its derived `base_instructions` field when rendering the catalog.
+Private catalog values, credentials, and consumer output remain outside publications.
