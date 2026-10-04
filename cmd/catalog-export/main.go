@@ -30,6 +30,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "--base and --out are required")
 		return 2
 	}
+	if err := rejectInputOutputAliases(*outPath, *basePath, *overridesPath); err != nil {
+		fmt.Fprintln(stderr, "catalog export failed")
+		return 1
+	}
 	data, err := catalog.Load(*basePath, *overridesPath)
 	if err != nil {
 		fmt.Fprintln(stderr, "catalog export failed")
@@ -41,6 +45,48 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintln(stdout, "Catalog exported.")
 	return 0
+}
+
+func rejectInputOutputAliases(outPath string, inputPaths ...string) error {
+	outputPath, err := cleanAbsolutePath(outPath)
+	if err != nil {
+		return errors.New("unable to resolve export path")
+	}
+	outputInfo, outputErr := os.Stat(outputPath)
+	if outputErr != nil && !errors.Is(outputErr, os.ErrNotExist) {
+		return errors.New("unable to inspect export path")
+	}
+	for _, inputPath := range inputPaths {
+		if inputPath == "" {
+			continue
+		}
+		absoluteInputPath, err := cleanAbsolutePath(inputPath)
+		if err != nil {
+			return errors.New("unable to resolve input path")
+		}
+		if outputPath == absoluteInputPath {
+			return errors.New("output path aliases an input")
+		}
+		inputInfo, inputErr := os.Stat(absoluteInputPath)
+		if inputErr != nil {
+			if errors.Is(inputErr, os.ErrNotExist) {
+				continue
+			}
+			return errors.New("unable to inspect input path")
+		}
+		if outputErr == nil && os.SameFile(outputInfo, inputInfo) {
+			return errors.New("output path aliases an input")
+		}
+	}
+	return nil
+}
+
+func cleanAbsolutePath(path string) (string, error) {
+	absolutePath, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Clean(absolutePath), nil
 }
 
 func writeExport(outPath string, data []byte, force bool) error {
