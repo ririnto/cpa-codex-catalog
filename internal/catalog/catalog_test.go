@@ -172,6 +172,32 @@ func TestBuildAcceptsLegacyBaseInstructions(t *testing.T) {
 	}
 }
 
+func TestPatchGeneratedResponsePreservesHostCatalogAboveExportLimit(t *testing.T) {
+	model := syntheticModel("alpha")
+	model["future_metadata"] = strings.Repeat("x", MaxCatalogBytes)
+	response, err := json.Marshal(map[string]any{"host_revision": "synthetic", "models": []map[string]any{model}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	patched, recognized, err := PatchGeneratedResponse(response, []byte(`{"defaults":{"display_name":"Patched"}}`))
+	if err != nil {
+		t.Fatalf("PatchGeneratedResponse() error = %v", err)
+	}
+	if !recognized {
+		t.Fatal("generated Codex catalog was not recognized")
+	}
+	if len(patched) <= MaxCatalogBytes {
+		t.Fatalf("patched host catalog size = %d, want more than the offline export limit", len(patched))
+	}
+	var result map[string]any
+	if err := json.Unmarshal(patched, &result); err != nil {
+		t.Fatalf("decode patched catalog: %v", err)
+	}
+	if result["host_revision"] != "synthetic" || result["models"].([]any)[0].(map[string]any)["future_metadata"] != strings.Repeat("x", MaxCatalogBytes) {
+		t.Fatal("host metadata was not preserved")
+	}
+}
+
 func TestLoadReadsFilesAndRedactsPathsOnErrors(t *testing.T) {
 	directory := t.TempDir()
 	basePath := filepath.Join(directory, "models.json")
