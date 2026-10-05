@@ -1,0 +1,85 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]*.[0-9]*.[0-9]*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Validate release version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=${GITHUB_REF_NAME#v}
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid release version" >&2
+            exit 1
+          fi
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Verify and build
+        env:
+          CGO_ENABLED: "1"
+        run: go tool task check VERSION=${{ steps.version.outputs.value }}
+
+      - name: Package native plugin
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import os
+          from pathlib import Path
+          import zipfile
+
+          plugin = Path("build/plugins/linux/amd64/cpa-codex-catalog.so")
+          dist = Path("dist")
+          dist.mkdir()
+          archive = dist / ("cpa-codex-catalog_" + os.environ["RELEASE_VERSION"] + "_linux_amd64.zip")
+          with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as package:
+              package.write(plugin, plugin.name)
+          digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+          (dist / "checksums.txt").write_text(digest + "  " + archive.name + "\n")
+          PY
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/*.zip dist/checksums.txt --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/*.zip dist/checksums.txt \
+              --verify-tag --title "$GITHUB_REF_NAME" \
+              --notes "Inline field overrides for the host-generated Codex model catalog. Native Linux amd64 plugin with SHA-256 checksums."
+          fi
+
+      - name: Clean build outputs
+        if: always()
+        run: |
+          go clean -cache
+          rm -rf build dist
