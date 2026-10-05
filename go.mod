@@ -3,7 +3,7 @@ module github.com/ririnto/cpa-codex-catalog
 go 1.26.8
 
 require (
-	github.com/router-for-me/CLIProxyAPI/v8 v8.0.13
+	github.com/router-for-me/CLIProxyAPI/v8 v8.0.15
 	gopkg.in/yaml.v3 v3.0.1
 )
 
