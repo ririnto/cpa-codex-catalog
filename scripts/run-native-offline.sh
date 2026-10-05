@@ -47,12 +47,12 @@ case "$system" in
       fi
       ip link set lo up
       cd "$repo_root/integration"
-      if [ -n "${CPA_NATIVE_UID:-}" ]; then
+      if [ -n "${CPA_NATIVE_USER:-}" ]; then
         runuser_path=$(command -v runuser) || {
           printf 'The sudo-created offline namespace requires util-linux runuser for user-owned test artifacts.\n' >&2
           exit 1
         }
-        exec "$runuser_path" --user "$CPA_NATIVE_UID" --group "$CPA_NATIVE_GID" -- /usr/bin/env -i \
+        exec "$runuser_path" --user "$CPA_NATIVE_USER" --group "$CPA_NATIVE_GROUP" -- /usr/bin/env -i \
           PATH="$safe_path" \
           HOME="$TMPDIR/home" \
           TMPDIR="$TMPDIR" \
@@ -94,8 +94,8 @@ case "$system" in
       PATH="$safe_path" \
       TMPDIR="$scratch" \
       CPA_NATIVE_NETNS=ready \
-      CPA_NATIVE_UID="$(id -u)" \
-      CPA_NATIVE_GID="$(id -g)" \
+      CPA_NATIVE_USER="$(id -un)" \
+      CPA_NATIVE_GROUP="$(id -gn)" \
       /bin/sh "$script_path"
     exit $?
     ;;
