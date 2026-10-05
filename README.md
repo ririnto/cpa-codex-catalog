@@ -6,11 +6,12 @@ It preserves source metadata and applies explicit JSON overrides without editing
 ## Requirements
 
 - Go 1.26.8 or newer.
-- CLIProxyAPI v8.0.13.
+- CLIProxyAPI fork release `v8.0.15-cpa.1`, based on upstream `v8.0.15`.
 - A C toolchain for the native shared library build.
 - Codex configured with a provider that supports the Responses API.
 
-The plugin uses the CLIProxyAPI v8.0.13 SDK pinned in `go.mod`.
+The plugin module pins the CLIProxyAPI SDK at v8.0.15.
+The fork release provides the bounded, request-scoped HTTP callback required for live inventory filtering.
 
 ## Build and install
 
@@ -95,6 +96,9 @@ Malformed provider rows return HTTP 503.
 The result preserves catalog order and metadata.
 Unknown provider IDs add no entries.
 The plugin fetches the inventory for each resource request and never serves stale or unfiltered results after a failure.
+It uses the host request context and a direct HTTP request with redirects disabled.
+It limits each inventory response to 1 MiB.
+An older host without the bounded callback returns HTTP 503 before the plugin fetches inventory.
 A successful empty intersection returns HTTP 200 with `{ "models": [] }`.
 An inventory error returns HTTP 503 with a fixed message.
 
@@ -159,7 +163,7 @@ See [contributing](CONTRIBUTING.md) for focused test and host integration comman
 
 ## References
 
-- [CLIProxyAPI v8.0.13 plugin example](https://github.com/router-for-me/CLIProxyAPI/blob/v8.0.13/examples/plugin/simple/README.md) documents plugin discovery and resource routes.
+- [CLIProxyAPI plugin example](https://github.com/ririnto/CLIProxyAPI/blob/v8.0.15-cpa.1/examples/plugin/simple/README.md) documents plugin discovery and resource routes.
 - [Codex provider configuration](https://github.com/openai/codex/blob/main/codex-rs/model-provider-info/src/lib.rs) defines `model_catalog_url` and provider authentication fields.
 - [Codex model catalog client](https://github.com/openai/codex/blob/main/codex-rs/codex-api/src/endpoint/models.rs) fetches the configured catalog through the provider client.
 - [Codex model metadata schema](https://github.com/openai/codex/blob/main/codex-rs/protocol/src/openai_models.rs) defines current prompt metadata under `model_messages`.

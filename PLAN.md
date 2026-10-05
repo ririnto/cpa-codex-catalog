@@ -69,3 +69,24 @@ Confirmed the isolated authenticated resource preserves merged metadata while fi
 Confirmed Codex consumes the filtered catalog and preserves every supplied metadata field.
 Codex adds its derived `base_instructions` field when rendering the catalog.
 Private catalog values, credentials, and consumer output remain outside publications.
+
+## Inventory Cancellation Delivery
+
+Propagate host request cancellation into connected inventory requests through the native SDK boundary.
+Main owns host dependency selection, Git delivery, and private runtime verification.
+The catalog owner maintains the consumer and deterministic cancellation tests after the host interface settles.
+Use `codex/cancel-inventory-fetch` against `main`.
+Use the named upstream `v8.0.15` release as the SDK baseline.
+Do not add post-connect timeouts or return stale metadata after cancellation.
+Prove that canceling a blocked resource request closes its inventory connection and releases plugin work.
+Run catalog checks and native host cancellation integration before independent published review and merge.
+
+## Cancellation Acceptance
+
+Use the maintained host release `v8.0.15-cpa.1` through a portable Go module replacement.
+The bounded callback preserves request cancellation, direct transport, disabled redirects, and the 1 MiB response cap.
+Older hosts fail before inventory retrieval when the required callback is unavailable.
+Passed Go 1.26.8 formatting, package race checks, vet, and the native shared-library build.
+Passed native resource authentication, exact-ID intersection, and blocked-request cancellation checks.
+Confirmed authenticated live inventory filtering preserves every supplied field and leaves the base file unchanged.
+Keep valid earlier Codex consumer evidence for the unchanged catalog response format.
