@@ -135,3 +135,5 @@ require (
 )
 
 tool github.com/go-task/task/v3/cmd/task
+
+replace github.com/router-for-me/CLIProxyAPI/v8 v8.0.15 => github.com/ririnto/CLIProxyAPI/v8 v8.0.15-cpa.1

@@ -10,7 +10,8 @@ It preserves source metadata and applies explicit JSON overrides without editing
 - A C toolchain for the native shared library build.
 - Codex configured with a provider that supports the Responses API.
 
-The plugin module pins the CLIProxyAPI SDK at v8.0.15.
+The module requires CLIProxyAPI SDK v8.0.15 and resolves it to the maintained fork tag `v8.0.15-cpa.1`.
+The fork supplies bounded inventory callbacks and cancellation support.
 The fork release provides the bounded, request-scoped HTTP callback required for live inventory filtering.
 
 ## Build and install
