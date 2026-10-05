@@ -3,13 +3,12 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginapi"
@@ -55,19 +54,6 @@ func TestCatalogResourceAndRegistration(t *testing.T) {
 	response, _ = service.handleManagement(request)
 	if response.StatusCode != http.StatusNotFound {
 		t.Fatalf("unknown path status = %d", response.StatusCode)
-	}
-}
-
-func TestAvailabilityHTTPClientHasNoActiveRequestDeadline(t *testing.T) {
-	if defaultAvailabilityHTTPClient.Timeout != 0 {
-		t.Fatalf("availability client timeout = %s, want none", defaultAvailabilityHTTPClient.Timeout)
-	}
-	transport, ok := defaultAvailabilityHTTPClient.Transport.(*http.Transport)
-	if !ok {
-		t.Fatalf("availability transport = %T, want *http.Transport", defaultAvailabilityHTTPClient.Transport)
-	}
-	if transport.ResponseHeaderTimeout != 0 {
-		t.Fatalf("response header timeout = %s, want none", transport.ResponseHeaderTimeout)
 	}
 }
 
@@ -165,7 +151,7 @@ func TestConcurrentCatalogSnapshotReconfiguration(t *testing.T) {
 	secondResponse, _ := service.handleManagement(pluginapi.ManagementRequest{Method: http.MethodGet, Path: resourcePath})
 	allowedBodies := map[string]bool{string(firstResponse.Body): true, string(secondResponse.Body): true}
 	var wait sync.WaitGroup
-	errors := make(chan string, 216)
+	observedErrors := make(chan string, 216)
 	wait.Add(1)
 	go func() {
 		defer wait.Done()
@@ -175,7 +161,7 @@ func TestConcurrentCatalogSnapshotReconfiguration(t *testing.T) {
 				path = secondPath
 			}
 			if err := service.configure(configYAML(path, nil, "")); err != nil {
-				errors <- "reconfigure failed"
+				observedErrors <- "reconfigure failed"
 			}
 		}
 	}()
@@ -186,14 +172,14 @@ func TestConcurrentCatalogSnapshotReconfiguration(t *testing.T) {
 			for index := 0; index < 24; index++ {
 				response, err := service.handleManagement(pluginapi.ManagementRequest{Method: http.MethodGet, Path: resourcePath})
 				if err != nil || response.StatusCode != http.StatusOK || !allowedBodies[string(response.Body)] {
-					errors <- "request observed an invalid snapshot"
+					observedErrors <- "request observed an invalid snapshot"
 				}
 			}
 		}()
 	}
 	wait.Wait()
-	close(errors)
-	for err := range errors {
+	close(observedErrors)
+	for err := range observedErrors {
 		t.Error(err)
 	}
 }
@@ -201,35 +187,38 @@ func TestConcurrentCatalogSnapshotReconfiguration(t *testing.T) {
 func TestAvailableModelsAreFetchedPerRequestWithCurrentBearerToken(t *testing.T) {
 	const tokenEnv = "CPA_AVAILABLE_MODELS_TEST_TOKEN"
 	t.Setenv(tokenEnv, "")
-	var requestCount atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		count := requestCount.Add(1)
-		if request.URL.Path != "/v1/models" || request.Method != http.MethodGet {
-			t.Errorf("upstream request = %s %s, want GET /v1/models", request.Method, request.URL.Path)
+	var requestCount int
+	service := newPluginService(func(callbackID string, request pluginapi.HTTPRequest) (pluginapi.HTTPResponse, error) {
+		requestCount++
+		if callbackID != "callback-fixture" {
+			t.Errorf("callback ID = %q, want callback-fixture", callbackID)
 		}
-		if request.Header.Get("Accept") != "application/json" {
-			t.Errorf("Accept = %q, want application/json", request.Header.Get("Accept"))
+		if request.Method != http.MethodGet || request.URL != "https://models.example.test/v1/models" {
+			t.Errorf("inventory request = %s %s", request.Method, request.URL)
 		}
-		if count == 1 {
-			if request.Header.Get("Authorization") != "Bearer token-one" {
-				t.Errorf("first Authorization = %q", request.Header.Get("Authorization"))
+		if !request.Direct || !request.DisableRedirects || request.MaxResponseBytes != maxAvailableModelsResponseBytes {
+			t.Errorf("inventory transport options = %+v", request)
+		}
+		if request.Headers.Get("Accept") != "application/json" {
+			t.Errorf("Accept = %q, want application/json", request.Headers.Get("Accept"))
+		}
+		if requestCount == 1 {
+			if request.Headers.Get("Authorization") != "Bearer token-one" {
+				t.Errorf("first Authorization = %q", request.Headers.Get("Authorization"))
 			}
-			_, _ = writer.Write([]byte(`{"object":"list","data":[{"id":"demo","object":"model","owned_by":"fixture"}]}`))
-			return
+			return pluginapi.HTTPResponse{StatusCode: http.StatusOK, Body: []byte(`{"object":"list","data":[{"id":"demo","object":"model","owned_by":"fixture"}]}`)}, nil
 		}
-		if request.Header.Get("Authorization") != "Bearer token-two" {
-			t.Errorf("second Authorization = %q", request.Header.Get("Authorization"))
+		if request.Headers.Get("Authorization") != "Bearer token-two" {
+			t.Errorf("second Authorization = %q", request.Headers.Get("Authorization"))
 		}
-		_, _ = writer.Write([]byte(`{"object":"list","data":[]}`))
-	}))
-	defer server.Close()
-	service := newPluginService(server.Client().Transport)
-	if err := service.configure(configWithAvailabilityYAML(writeTestCatalog(t, "configured"), server.URL+"/v1/models", tokenEnv)); err != nil {
+		return pluginapi.HTTPResponse{StatusCode: http.StatusOK, Body: []byte(`{"object":"list","data":[]}`)}, nil
+	})
+	if err := service.configure(configWithAvailabilityYAML(writeTestCatalog(t, "configured"), "https://models.example.test/v1/models", tokenEnv)); err != nil {
 		t.Fatalf("configure() read or rejected the deferred token: %v", err)
 	}
 	t.Setenv(tokenEnv, "token-one")
 	request := pluginapi.ManagementRequest{Method: http.MethodGet, Path: resourcePath}
-	first, err := service.handleManagement(request)
+	first, err := service.handleManagementWithCallback(request, "callback-fixture")
 	if err != nil || first.StatusCode != http.StatusOK {
 		t.Fatalf("first resource response = (%+v, %v)", first, err)
 	}
@@ -240,38 +229,35 @@ func TestAvailableModelsAreFetchedPerRequestWithCurrentBearerToken(t *testing.T)
 		t.Fatalf("first filtered catalog = %s (%v)", first.Body, err)
 	}
 	t.Setenv(tokenEnv, "token-two")
-	second, err := service.handleManagement(request)
+	second, err := service.handleManagementWithCallback(request, "callback-fixture")
 	if err != nil || second.StatusCode != http.StatusOK || string(second.Body) != `{"models":[]}` {
 		t.Fatalf("second resource response = (%+v, %v), want empty successful catalog", second, err)
 	}
-	if requestCount.Load() != 2 {
-		t.Fatalf("availability requests = %d, want one per resource request", requestCount.Load())
+	if requestCount != 2 {
+		t.Fatalf("availability requests = %d, want one per resource request", requestCount)
 	}
 }
 
 func TestAvailableModelsSuccessfulReconfigureChangesInventorySource(t *testing.T) {
-	firstUpstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
-		_, _ = writer.Write([]byte(`{"data":[{"id":"demo"}]}`))
-	}))
-	defer firstUpstream.Close()
-	secondUpstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
-		_, _ = writer.Write([]byte(`{"data":[]}`))
-	}))
-	defer secondUpstream.Close()
-	service := newPluginService(firstUpstream.Client().Transport)
+	service := newPluginService(func(_ string, request pluginapi.HTTPRequest) (pluginapi.HTTPResponse, error) {
+		if request.URL == "https://first.example.test/v1/models" {
+			return pluginapi.HTTPResponse{StatusCode: http.StatusOK, Body: []byte(`{"data":[{"id":"demo"}]}`)}, nil
+		}
+		return pluginapi.HTTPResponse{StatusCode: http.StatusOK, Body: []byte(`{"data":[]}`)}, nil
+	})
 	catalogPath := writeTestCatalog(t, "configured")
-	if err := service.configure(configWithAvailabilityYAML(catalogPath, firstUpstream.URL+"/v1/models", "")); err != nil {
+	if err := service.configure(configWithAvailabilityYAML(catalogPath, "https://first.example.test/v1/models", "")); err != nil {
 		t.Fatalf("configure(first) error = %v", err)
 	}
 	request := pluginapi.ManagementRequest{Method: http.MethodGet, Path: resourcePath}
-	first, _ := service.handleManagement(request)
+	first, _ := service.handleManagementWithCallback(request, "callback-fixture")
 	if first.StatusCode != http.StatusOK || !bytes.Contains(first.Body, []byte("\"slug\":\"demo\"")) {
 		t.Fatalf("first inventory response = %+v", first)
 	}
-	if err := service.configure(configWithAvailabilityYAML(catalogPath, secondUpstream.URL+"/v1/models", "")); err != nil {
+	if err := service.configure(configWithAvailabilityYAML(catalogPath, "https://second.example.test/v1/models", "")); err != nil {
 		t.Fatalf("configure(second) error = %v", err)
 	}
-	second, _ := service.handleManagement(request)
+	second, _ := service.handleManagementWithCallback(request, "callback-fixture")
 	if second.StatusCode != http.StatusOK || string(second.Body) != `{"models":[]}` {
 		t.Fatalf("second inventory response = %+v, want empty successful catalog", second)
 	}
@@ -279,46 +265,34 @@ func TestAvailableModelsSuccessfulReconfigureChangesInventorySource(t *testing.T
 
 func TestAvailableModelsFailuresReturnStaticServiceUnavailable(t *testing.T) {
 	for _, testCase := range []struct {
-		name   string
-		status int
-		body   string
-		extra  func(http.ResponseWriter, *http.Request)
+		name     string
+		response pluginapi.HTTPResponse
+		err      error
 	}{
-		{name: "malformed", status: http.StatusOK, body: `{"data":[{"id":"demo","supported_in_api":"true"}]}`},
-		{name: "upstream status", status: http.StatusBadGateway, body: `private upstream diagnostic`},
-		{name: "redirect", status: http.StatusFound, extra: func(w http.ResponseWriter, r *http.Request) {
-			http.Redirect(w, r, "/redirect-target", http.StatusFound)
-		}},
-		{name: "oversized", status: http.StatusOK, body: strings.Repeat("x", maxAvailableModelsResponseBytes+1)},
+		{name: "malformed", response: pluginapi.HTTPResponse{StatusCode: http.StatusOK, Body: []byte(`{"data":[{"id":"demo","supported_in_api":"true"}]}`)}},
+		{name: "upstream status", response: pluginapi.HTTPResponse{StatusCode: http.StatusBadGateway, Body: []byte(`private upstream diagnostic`)}},
+		{name: "redirect", response: pluginapi.HTTPResponse{StatusCode: http.StatusFound}},
+		{name: "oversized", response: pluginapi.HTTPResponse{StatusCode: http.StatusOK, Body: []byte(strings.Repeat("x", maxAvailableModelsResponseBytes+1))}},
+		{name: "host callback unavailable", err: errors.New("private callback detail")},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
-			var redirectTargetRequests atomic.Int32
-			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-				if request.URL.Path == "/redirect-target" {
-					redirectTargetRequests.Add(1)
-					return
-				}
-				if testCase.extra != nil {
-					testCase.extra(writer, request)
-					return
-				}
-				writer.WriteHeader(testCase.status)
-				_, _ = writer.Write([]byte(testCase.body))
-			}))
-			defer server.Close()
-			service := newPluginService(server.Client().Transport)
-			if err := service.configure(configWithAvailabilityYAML(writeTestCatalog(t, "must-not-leak"), server.URL+"/v1/models", "")); err != nil {
+			var callbackCalls int
+			service := newPluginService(func(_ string, _ pluginapi.HTTPRequest) (pluginapi.HTTPResponse, error) {
+				callbackCalls++
+				return testCase.response, testCase.err
+			})
+			if err := service.configure(configWithAvailabilityYAML(writeTestCatalog(t, "must-not-leak"), "https://models.example.test/v1/models", "")); err != nil {
 				t.Fatalf("configure() error = %v", err)
 			}
-			response, err := service.handleManagement(pluginapi.ManagementRequest{Method: http.MethodGet, Path: resourcePath})
+			response, err := service.handleManagementWithCallback(pluginapi.ManagementRequest{Method: http.MethodGet, Path: resourcePath}, "callback-fixture")
 			if err != nil || response.StatusCode != http.StatusServiceUnavailable {
 				t.Fatalf("resource response = (%+v, %v), want static 503", response, err)
 			}
-			if string(response.Body) != `{"error":"model availability unavailable"}` || bytes.Contains(response.Body, []byte("must-not-leak")) || bytes.Contains(response.Body, []byte("private upstream diagnostic")) {
+			if string(response.Body) != `{"error":"model availability unavailable"}` || bytes.Contains(response.Body, []byte("must-not-leak")) || bytes.Contains(response.Body, []byte("private upstream diagnostic")) || bytes.Contains(response.Body, []byte("private callback detail")) {
 				t.Fatalf("failure response exposed stale catalog or upstream details: %s", response.Body)
 			}
-			if redirectTargetRequests.Load() != 0 {
-				t.Fatalf("redirect target requests = %d, want zero", redirectTargetRequests.Load())
+			if callbackCalls != 1 {
+				t.Fatalf("host callback calls = %d, want one", callbackCalls)
 			}
 		})
 	}
@@ -375,19 +349,20 @@ func TestAvailabilityURLValidationAndFailedReconfigure(t *testing.T) {
 func TestMissingAvailabilityBearerReturnsStaticServiceUnavailable(t *testing.T) {
 	const tokenEnv = "CPA_MISSING_AVAILABLE_MODELS_TOKEN"
 	t.Setenv(tokenEnv, "")
-	var upstreamRequests atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { upstreamRequests.Add(1) }))
-	defer server.Close()
-	service := newPluginService(server.Client().Transport)
-	if err := service.configure(configWithAvailabilityYAML(writeTestCatalog(t, "configured"), server.URL+"/v1/models", tokenEnv)); err != nil {
+	var callbackCalls int
+	service := newPluginService(func(_ string, _ pluginapi.HTTPRequest) (pluginapi.HTTPResponse, error) {
+		callbackCalls++
+		return pluginapi.HTTPResponse{StatusCode: http.StatusOK}, nil
+	})
+	if err := service.configure(configWithAvailabilityYAML(writeTestCatalog(t, "configured"), "https://models.example.test/v1/models", tokenEnv)); err != nil {
 		t.Fatalf("configure() required an environment value before a request: %v", err)
 	}
-	response, err := service.handleManagement(pluginapi.ManagementRequest{Method: http.MethodGet, Path: resourcePath})
+	response, err := service.handleManagementWithCallback(pluginapi.ManagementRequest{Method: http.MethodGet, Path: resourcePath}, "callback-fixture")
 	if err != nil || response.StatusCode != http.StatusServiceUnavailable || string(response.Body) != `{"error":"model availability unavailable"}` {
 		t.Fatalf("resource response = (%+v, %v), want static 503", response, err)
 	}
-	if upstreamRequests.Load() != 0 {
-		t.Fatalf("requests made with missing token = %d, want zero", upstreamRequests.Load())
+	if callbackCalls != 0 {
+		t.Fatalf("requests made with missing token = %d, want zero", callbackCalls)
 	}
 }
 

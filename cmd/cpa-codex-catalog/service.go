@@ -23,8 +23,8 @@ var envNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 var bearerTokenPattern = regexp.MustCompile(`^[A-Za-z0-9._~+/-]+=*$`)
 
 type pluginService struct {
-	current          atomic.Pointer[serviceSnapshot]
-	availabilityHTTP *http.Client
+	current        atomic.Pointer[serviceSnapshot]
+	availabilityDo boundedHostHTTPDo
 }
 
 type serviceSnapshot struct {
@@ -46,40 +46,8 @@ type configFile struct {
 	AvailableModelsTokenEnv string `yaml:"available_models_token_env"`
 }
 
-var defaultAvailabilityHTTPClient = createAvailabilityHTTPClient(nil)
-
-func newPluginService(transport http.RoundTripper) *pluginService {
-	if transport == nil {
-		return &pluginService{availabilityHTTP: defaultAvailabilityHTTPClient}
-	}
-	return &pluginService{availabilityHTTP: createAvailabilityHTTPClient(transport)}
-}
-
-func createAvailabilityHTTPClient(transport http.RoundTripper) *http.Client {
-	if transport == nil {
-		if defaultTransport, ok := http.DefaultTransport.(*http.Transport); ok {
-			transport = defaultTransport.Clone()
-		} else {
-			transport = &http.Transport{}
-		}
-		if defaultTransport, ok := transport.(*http.Transport); ok {
-			defaultTransport.Proxy = nil
-			defaultTransport.ResponseHeaderTimeout = 0
-		}
-	}
-	return &http.Client{
-		Transport: transport,
-		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
-}
-
-func (s *pluginService) availabilityClient() *http.Client {
-	if s.availabilityHTTP != nil {
-		return s.availabilityHTTP
-	}
-	return defaultAvailabilityHTTPClient
+func newPluginService(doBounded boundedHostHTTPDo) *pluginService {
+	return &pluginService{availabilityDo: doBounded}
 }
 
 func (s *pluginService) configure(raw []byte) error {
@@ -161,6 +129,10 @@ func (s *pluginService) registerManagement() pluginapi.ManagementRegistrationRes
 }
 
 func (s *pluginService) handleManagement(request pluginapi.ManagementRequest) (pluginapi.ManagementResponse, error) {
+	return s.handleManagementWithCallback(request, "")
+}
+
+func (s *pluginService) handleManagementWithCallback(request pluginapi.ManagementRequest, callbackID string) (pluginapi.ManagementResponse, error) {
 	if request.Path != resourcePath {
 		return jsonResponse(http.StatusNotFound, "resource not found", nil), nil
 	}
@@ -179,7 +151,7 @@ func (s *pluginService) handleManagement(request pluginapi.ManagementRequest) (p
 	}
 	body := snapshot.catalog
 	if snapshot.availableModelsURL != "" {
-		availability, err := fetchAvailableModels(s.availabilityClient(), snapshot.availableModelsURL, snapshot.availableModelsTokenEnv)
+		availability, err := fetchAvailableModels(s.availabilityDo, callbackID, snapshot.availableModelsURL, snapshot.availableModelsTokenEnv)
 		if err != nil {
 			return jsonResponse(http.StatusServiceUnavailable, "model availability unavailable", nil), nil
 		}
