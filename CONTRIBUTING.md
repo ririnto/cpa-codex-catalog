@@ -12,16 +12,23 @@ go tool task build
 ```
 
 Run `go tool task check` before handing off a complete change.
-It checks formatting, race-enabled tests, static analysis, and the native library build.
+It checks formatting, race-enabled tests, static analysis, the native library build, and required host integration.
 
-The integration task requires `CPA_BINARY` to point to a CLIProxyAPI v8 server binary.
-It runs against a mock upstream and should use synthetic catalog files.
+Prepare the pinned SDK host, plugin, and integration test executable before a focused host run.
+Preparation may download dependencies.
 
 ```sh
-CPA_BINARY=/path/to/cli-proxy-api go tool task integration
+go tool task prepare-native
+go tool task integration
 ```
 
-Run host integration outside CLIProxyAPI Home mode because Home mode does not serve plugin resources.
+The integration task runs prepared binaries against versioned synthetic seeds.
+Missing binaries or seed files fail the required lane.
+Linux requires `unshare`, `ip`, `runuser`, and permission to create a network namespace.
+The runner enables only loopback and fails when it cannot establish that isolation.
+macOS requires `sandbox-exec` and runs the same fixtures with a profile that permits only loopback networking.
+The runner fails if the sandbox tool or profile is unavailable.
+The host uses its embedded catalogs and disables remote catalog updates.
 
 Keep tests offline and use disposable synthetic fixtures.
 Do not use real Codex accounts, provider credentials, live model caches, or production endpoints in tests.

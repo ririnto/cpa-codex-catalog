@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"testing"
 	"time"
@@ -21,46 +23,60 @@ const (
 )
 
 func TestNativeHostPatchesGeneratedCodexCatalog(t *testing.T) {
-	binary := os.Getenv("CPA_BINARY")
-	if binary == "" {
-		t.Skip("set CPA_BINARY to a built CLIProxyAPI v8 server for native host integration")
+	binary, err := filepath.Abs(filepath.Join("..", "build", "native", "cliproxyapi-v8.0.15"))
+	if err != nil {
+		t.Fatalf("resolve prepared host path: %v", err)
 	}
-	base := startProxy(t, binary)
-	codex := getJSON(t, base+"/v1/models?client_version=0.153.1")
-	models, ok := codex["models"].([]any)
-	if !ok || len(models) != 1 {
-		t.Fatalf("generated Codex models = %#v, want the one configured host model", codex["models"])
+	if _, err := os.Stat(binary); err != nil {
+		t.Fatalf("native integration requires prepared host artifacts; run `go tool task prepare-native` and `go tool task integration`: %v", err)
+	}
+	var requests map[string]modelListRequest
+	loadSeed(t, "model-list-requests.json", &requests)
+	var expected map[string]modelListExpectation
+	loadSeed(t, "model-list-responses.expected.json", &expected)
+	pluginConfig := loadSeedBytes(t, "plugin-config.json")
+	base := startProxy(t, binary, requests["codex"], pluginConfig)
+	codex := getJSONFromSeed(t, base, requests["codex"])
+	models := assertModelCollection(t, codex, expected["codex"])
+	if len(models) == 0 {
+		t.Fatal("generated Codex catalog has no host models")
 	}
 	model := models[0].(map[string]any)
-	if model["slug"] != fixtureModelID || model["display_name"] != "Codex fixture override" || model["supports_search_tool"] != true {
+	if model["slug"] != expected["codex"].Slug || model["display_name"] != expected["codex"].DisplayName || model["supports_search_tool"] != expected["codex"].SupportsSearchTool {
 		t.Fatalf("generated Codex model lost its host entry or inline overrides: %#v", model)
 	}
 	futureMetadata, ok := model["future_metadata"].(map[string]any)
-	if !ok || futureMetadata["source"] != "fixture" {
-		t.Fatalf("unknown model metadata was not retained: %#v", model["future_metadata"])
+	if !ok || !reflect.DeepEqual(futureMetadata, expected["codex"].FutureMetadata) {
+		t.Fatalf("inline unknown metadata overrides = %#v, want %#v", model["future_metadata"], expected["codex"].FutureMetadata)
 	}
-	if _, exists := model["model_messages"].(map[string]any); !exists {
+	modelMessages, exists := model["model_messages"].(map[string]any)
+	if !exists || modelMessages["instructions_template"] == "" {
 		t.Fatalf("host Codex metadata was lost: %#v", model)
+	}
+	if _, exists := model["supported_reasoning_levels"].([]any); !exists {
+		t.Fatalf("host reasoning metadata was lost: %#v", model)
 	}
 	if containsModel(models, "dormant-model") {
 		t.Fatal("a dormant slug override added a host model")
 	}
 
-	openAI := getJSON(t, base+"/v1/models")
+	baselineConfig := setPluginEnabled(t, pluginConfig, false)
+	baseline := startProxy(t, binary, requests["codex"], baselineConfig)
+	baselineCodex := getJSONFromSeed(t, baseline, requests["codex"])
+	baselineModels := assertModelCollection(t, baselineCodex, expected["codex"])
+	assertHostMetadataPreserved(t, baselineModels[0].(map[string]any), model)
+
+	openAI := getJSONFromSeed(t, base, requests["openai"])
 	if _, exists := openAI["models"]; exists {
 		t.Fatalf("generic OpenAI inventory changed shape: %#v", openAI)
 	}
-	if rows, ok := openAI["data"].([]any); !ok || len(rows) != 1 {
-		t.Fatalf("generic OpenAI inventory = %#v, want one data row", openAI["data"])
-	}
+	assertModelCollection(t, openAI, expected["openai"])
 
-	claude := getJSONWithHeaders(t, base+"/v1/models", http.Header{"Anthropic-Version": []string{"2023-06-01"}})
-	if _, exists := claude["data"].([]any); !exists {
-		t.Fatalf("Claude model list changed shape: %#v", claude)
-	}
+	claude := getJSONFromSeed(t, base, requests["claude"])
+	assertModelCollection(t, claude, expected["claude"])
 }
 
-func startProxy(t *testing.T, binary string) string {
+func startProxy(t *testing.T, binary string, codexRequest modelListRequest, pluginConfig []byte) string {
 	t.Helper()
 	root := t.TempDir()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -93,6 +109,10 @@ func startProxy(t *testing.T, binary string) string {
 	if err := os.MkdirAll(authDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
+	var compactConfig bytes.Buffer
+	if err := json.Compact(&compactConfig, pluginConfig); err != nil {
+		t.Fatalf("compact synthetic plugin configuration: %v", err)
+	}
 	config := fmt.Sprintf(`config-version: 8
 server:
   host: 127.0.0.1
@@ -116,18 +136,8 @@ plugins:
   enabled: true
   dir: %q
   configs:
-    cpa-codex-catalog:
-      enabled: true
-      defaults:
-        supports_search_tool: true
-      models:
-        %s:
-          display_name: Codex fixture override
-          future_metadata:
-            source: fixture
-        dormant-model:
-          display_name: Dormant model
-`, port, clientKey, authDir, fixtureModelID, fixtureModelID, filepath.Join(root, "plugins"), fixtureModelID)
+    cpa-codex-catalog: %s
+`, port, clientKey, authDir, fixtureModelID, fixtureModelID, filepath.Join(root, "plugins"), compactConfig.String())
 	configPath := filepath.Join(root, "config.yaml")
 	if err := os.WriteFile(configPath, []byte(config), 0o600); err != nil {
 		t.Fatal(err)
@@ -162,7 +172,7 @@ plugins:
 			log, _ := os.ReadFile(logPath)
 			t.Fatalf("native host failed to load inline catalog overrides: %s", log)
 		case <-ticker.C:
-			request, err := http.NewRequest(http.MethodGet, base+"/v1/models?client_version=0.153.1", nil)
+			request, err := http.NewRequest(codexRequest.Method, base+codexRequest.Path, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -193,8 +203,31 @@ func isolatedEnvironment(root string) []string {
 	return []string{"PATH=/usr/bin:/bin", "HOME=" + root, "TMPDIR=" + root}
 }
 
-func getJSON(t *testing.T, rawURL string) map[string]any {
-	return getJSONWithHeaders(t, rawURL, nil)
+type modelListRequest struct {
+	Method  string            `json:"method"`
+	Path    string            `json:"path"`
+	Headers map[string]string `json:"headers"`
+}
+
+type modelListExpectation struct {
+	Collection         string         `json:"collection"`
+	Count              int            `json:"count"`
+	Slug               string         `json:"slug"`
+	DisplayName        string         `json:"display_name"`
+	SupportsSearchTool bool           `json:"supports_search_tool"`
+	FutureMetadata     map[string]any `json:"future_metadata"`
+}
+
+func getJSONFromSeed(t *testing.T, base string, seed modelListRequest) map[string]any {
+	t.Helper()
+	if seed.Method != http.MethodGet {
+		t.Fatalf("seed request method = %q, want GET", seed.Method)
+	}
+	headers := make(http.Header)
+	for name, value := range seed.Headers {
+		headers.Set(name, value)
+	}
+	return getJSONWithHeaders(t, base+seed.Path, headers)
 }
 
 func getJSONWithHeaders(t *testing.T, rawURL string, headers http.Header) map[string]any {
@@ -226,6 +259,83 @@ func getJSONWithHeaders(t *testing.T, rawURL string, headers http.Header) map[st
 		t.Fatalf("decode GET %s: %v: %s", rawURL, err, body)
 	}
 	return decoded
+}
+
+func loadSeed(t *testing.T, name string, value any) {
+	t.Helper()
+	if err := json.Unmarshal(loadSeedBytes(t, name), value); err != nil {
+		t.Fatalf("decode synthetic seed %q: %v", name, err)
+	}
+}
+
+func loadSeedBytes(t *testing.T, name string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("testdata", "v1-synthetic", name))
+	if err != nil {
+		t.Fatalf("read synthetic seed %q: %v", name, err)
+	}
+	return data
+}
+
+func setPluginEnabled(t *testing.T, config []byte, enabled bool) []byte {
+	t.Helper()
+	var decoded map[string]any
+	if err := json.Unmarshal(config, &decoded); err != nil {
+		t.Fatalf("decode plugin config for baseline: %v", err)
+	}
+	decoded["enabled"] = enabled
+	encoded, err := json.Marshal(decoded)
+	if err != nil {
+		t.Fatalf("encode plugin config for baseline: %v", err)
+	}
+	return encoded
+}
+
+func assertHostMetadataPreserved(t *testing.T, baseline, patched map[string]any) {
+	t.Helper()
+	pluginManagedFields := map[string]struct{}{
+		"description":          {},
+		"display_name":         {},
+		"future_metadata":      {},
+		"input_modalities":     {},
+		"supports_search_tool": {},
+	}
+	for name, value := range baseline {
+		if _, changedByConfig := pluginManagedFields[name]; changedByConfig {
+			continue
+		}
+		if name == "model_messages" {
+			baselineMessages, ok := value.(map[string]any)
+			if !ok {
+				t.Fatalf("baseline model_messages is %T, want object", value)
+			}
+			patchedMessages, ok := patched[name].(map[string]any)
+			if !ok {
+				t.Fatalf("patched model_messages is %T, want object", patched[name])
+			}
+			for messageName, messageValue := range baselineMessages {
+				if messageName == "tools" {
+					continue
+				}
+				if got, exists := patchedMessages[messageName]; !exists || !reflect.DeepEqual(got, messageValue) {
+					t.Fatalf("host model_messages.%s changed: got %#v, want %#v", messageName, got, messageValue)
+				}
+			}
+			continue
+		}
+		if got, exists := patched[name]; !exists || !reflect.DeepEqual(got, value) {
+			t.Fatalf("host model field %q changed: got %#v, want %#v", name, got, value)
+		}
+	}
+}
+
+func assertModelCollection(t *testing.T, response map[string]any, expected modelListExpectation) []any {
+	t.Helper()
+	models, ok := response[expected.Collection].([]any)
+	if !ok || len(models) != expected.Count {
+		t.Fatalf("response collection %q = %#v, want %d rows", expected.Collection, response[expected.Collection], expected.Count)
+	}
+	return models
 }
 
 func containsModel(models []any, id string) bool {

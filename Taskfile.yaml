@@ -29,12 +29,12 @@ tasks:
   test:
     desc: Run package tests with synthetic fixtures
     cmds:
-      - go test ./...
+      - go test ./cmd/catalog-export ./cmd/cpa-codex-catalog ./internal/catalog
 
   test-race:
     desc: Run package tests with the race detector
     cmds:
-      - go test -race ./...
+      - go test -race ./cmd/catalog-export ./cmd/cpa-codex-catalog ./internal/catalog
 
   vet:
     desc: Run Go static checks
@@ -47,22 +47,25 @@ tasks:
       CGO_ENABLED: '1'
     cmds:
       - mkdir -p 'build/plugins/{{.GOOS}}/{{.GOARCH}}'
-      - go build -trimpath -buildvcs=false -buildmode=c-shared -ldflags '-X main.pluginVersion={{.VERSION}}' -o '{{.ARTIFACT}}' ./cmd/cpa-codex-catalog
+      - go build -mod=readonly -trimpath -buildvcs=false -buildmode=c-shared -ldflags '-X main.pluginVersion={{.VERSION}}' -o '{{.ARTIFACT}}' ./cmd/cpa-codex-catalog
       - rm -f 'build/plugins/{{.GOOS}}/{{.GOARCH}}/cpa-codex-catalog.h'
 
   integration:
-    desc: Load the plugin in a supplied CLIProxyAPI v8 host with a mock upstream
-    preconditions:
-      - sh: test -n "$CPA_BINARY"
-        msg: Set CPA_BINARY to a built CLIProxyAPI v8 server
+    desc: Run prepared synthetic native integration
+    cmds:
+      - sh scripts/run-native-offline.sh
+
+  prepare-native:
+    desc: Build the pinned CLIProxyAPI host and native integration test binary
     cmds:
       - task: build
-      - go test -count=1 -v ./integration
+      - sh scripts/prepare-native.sh
 
   check:
-    desc: Run formatting, tests, static checks, and the native build
+    desc: Run formatting, unit tests, static checks, and required prepared native integration
     cmds:
       - task: fmt-check
+      - task: prepare-native
       - task: test-race
       - task: vet
-      - task: build
+      - task: integration

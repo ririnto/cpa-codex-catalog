@@ -5,6 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -213,6 +216,31 @@ func TestHandleMethodReconfiguresInlineOverrides(t *testing.T) {
 	}
 }
 
+func TestVersionedSyntheticCatalogSeed(t *testing.T) {
+	seedDir := filepath.Join("..", "..", "integration", "testdata", "v1-synthetic")
+	generated := readSyntheticSeed(t, seedDir, "generated-codex-catalog.json")
+	config := readSyntheticSeed(t, seedDir, "plugin-config.json")
+	expected := readSyntheticSeed(t, seedDir, "patched-codex-catalog.expected.json")
+	service := newPluginService()
+	if err := service.configure(config); err != nil {
+		t.Fatalf("configure synthetic seed: %v", err)
+	}
+	response, err := service.InterceptResponse(context.Background(), codexListRequest(generated))
+	if err != nil {
+		t.Fatalf("intercept synthetic seed: %v", err)
+	}
+	var actualValue, expectedValue any
+	if err := json.Unmarshal(response.Body, &actualValue); err != nil {
+		t.Fatalf("decode patched seed: %v", err)
+	}
+	if err := json.Unmarshal(expected, &expectedValue); err != nil {
+		t.Fatalf("decode expected seed: %v", err)
+	}
+	if !reflect.DeepEqual(actualValue, expectedValue) {
+		t.Fatalf("patched response differs from expected seed:\n got: %#v\nwant: %#v", actualValue, expectedValue)
+	}
+}
+
 func codexListRequest(body []byte) pluginapi.ResponseInterceptRequest {
 	return pluginapi.ResponseInterceptRequest{
 		SourceFormat:    "openai",
@@ -242,4 +270,13 @@ func containsString(values []string, expected string) bool {
 		}
 	}
 	return false
+}
+
+func readSyntheticSeed(t *testing.T, directory, name string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(directory, name))
+	if err != nil {
+		t.Fatalf("read synthetic seed %q: %v", name, err)
+	}
+	return data
 }

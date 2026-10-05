@@ -1,0 +1,30 @@
+{
+  "enabled": true,
+  "defaults": {
+    "description": "Shared description",
+    "input_modalities": ["text"],
+    "supports_search_tool": true,
+    "model_messages": {
+      "tools": {
+        "multi_agent": {
+          "spawn_agent": {"description": "Default tool description"}
+        }
+      }
+    },
+    "future_metadata": {"shared": true}
+  },
+  "models": {
+    "codex-fixture-model": {
+      "display_name": "Codex fixture override",
+      "model_messages": {
+        "tools": {
+          "multi_agent": {
+            "spawn_agent": {"parameters": "Model parameters"}
+          }
+        }
+      },
+      "future_metadata": {"source": "fixture"}
+    },
+    "dormant-model": {"display_name": "Dormant model"}
+  }
+}

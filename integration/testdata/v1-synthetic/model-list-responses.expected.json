@@ -1,0 +1,12 @@
+{
+  "codex": {
+    "collection": "models",
+    "count": 1,
+    "slug": "codex-fixture-model",
+    "display_name": "Codex fixture override",
+    "supports_search_tool": true,
+    "future_metadata": {"shared": true, "source": "fixture"}
+  },
+  "openai": {"collection": "data", "count": 1},
+  "claude": {"collection": "data", "count": 1}
+}

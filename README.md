@@ -46,6 +46,7 @@ api_key_model_discovery = true
 [model_providers.example]
 name = "Example"
 base_url = "http://127.0.0.1:8317/v1"
+model_catalog_url = "http://127.0.0.1:8317/v1/models"
 wire_api = "responses"
 env_key = "CLIPROXY_API_KEY"
 ```
@@ -54,7 +55,10 @@ Restart Codex after changing provider configuration.
 The [Z.AI Codex guide](https://docs.z.ai/devpack/tool/codex.md) shows the local `model_catalog_json` option and Responses setup.
 Its sample uses the older `base_instructions` field, while current Codex metadata represents prompt text under `model_messages.instructions_template`.
 Preserving a legacy field in a catalog does not guarantee that every Codex version will use it.
-Codex uses `base_url` for model discovery and inference routing through the proxy.
+Codex uses `model_catalog_url` for discovery and `base_url` for Responses requests.
+An `openai_base_url` override changes the built-in OpenAI endpoint.
+API-key discovery requires an explicit catalog URL when you override that endpoint.
+Use the custom provider above to fetch this plugin's catalog.
 
 ## Catalog and overrides
 
@@ -115,6 +119,12 @@ Run the repository checks with:
 ```sh
 go tool task check
 ```
+
+The check prepares the pinned SDK host, native plugin, and integration test binary before running the synthetic host cases.
+Dependency preparation may download the modules selected by `go.mod`.
+The integration run uses committed seeds under `integration/testdata/v1-synthetic` and requires no provider credentials.
+Linux runs it in a network namespace with only loopback available.
+On macOS, `sandbox-exec` permits only loopback networking and the runner isolates the child environment.
 
 See [contributing](CONTRIBUTING.md) for focused test and host integration commands.
 
