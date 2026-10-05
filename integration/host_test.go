@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -239,6 +240,91 @@ func TestNativeHostAvailableModelsIntersection(t *testing.T) {
 	}
 	if inventoryRequests.Load() == 0 {
 		t.Fatal("native host did not request the configured inventory")
+	}
+}
+
+func TestNativeHostAvailabilityRequestCancellation(t *testing.T) {
+	binary := os.Getenv("CPA_BINARY")
+	if binary == "" {
+		t.Skip("set CPA_BINARY to a built CLIProxyAPI v8 server for native host integration")
+	}
+	const availableTokenEnv = "CPA_CODEX_CATALOG_CANCEL_TEST_TOKEN"
+	const availableToken = "fixture-cancel-token"
+	var inventoryRequests atomic.Int32
+	var inventoryStartedOnce sync.Once
+	var inventoryCanceledOnce sync.Once
+	inventoryStarted := make(chan struct{})
+	inventoryCanceled := make(chan struct{})
+	releaseUpstream := make(chan struct{})
+	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Header.Get("Authorization") != "Bearer "+availableToken {
+			http.Error(writer, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if inventoryRequests.Add(1) == 1 {
+			_, _ = writer.Write([]byte(`{"data":[{"id":"codex-fixture-model"}]}`))
+			return
+		}
+		inventoryStartedOnce.Do(func() { close(inventoryStarted) })
+		select {
+		case <-request.Context().Done():
+			inventoryCanceledOnce.Do(func() { close(inventoryCanceled) })
+		case <-releaseUpstream:
+		}
+	}))
+	defer func() {
+		close(releaseUpstream)
+		upstream.Close()
+	}()
+	fixtureDir, err := os.MkdirTemp("", "cpa-codex-catalog-cancel-integration-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(fixtureDir) })
+	catalogPath := filepath.Join(fixtureDir, "catalog.json")
+	if err := os.WriteFile(catalogPath, []byte(catalogFixture), 0600); err != nil {
+		t.Fatal(err)
+	}
+	overridesPath := filepath.Join(fixtureDir, "overrides.json")
+	if err := os.WriteFile(overridesPath, []byte(overridesFixture), 0600); err != nil {
+		t.Fatal(err)
+	}
+	base := startProxy(t, binary, catalogPath, overridesPath, availabilityConfig{url: upstream.URL + "/v1/models", tokenEnv: availableTokenEnv, token: availableToken})
+	requestContext, cancelRequest := context.WithCancel(context.Background())
+	defer cancelRequest()
+	request, err := http.NewRequestWithContext(requestContext, http.MethodGet, base+resourcePath+"?client_version=0.153.1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer "+resourceBearer)
+	clientDone := make(chan error, 1)
+	go func() {
+		response, errDo := http.DefaultClient.Do(request)
+		if response != nil {
+			_, _ = io.Copy(io.Discard, response.Body)
+			_ = response.Body.Close()
+		}
+		clientDone <- errDo
+	}()
+	select {
+	case <-inventoryStarted:
+	case <-time.After(5 * time.Second):
+		cancelRequest()
+		t.Fatal("inventory request did not reach the blocked upstream")
+	}
+	cancelRequest()
+	select {
+	case <-inventoryCanceled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("resource request cancellation did not reach the inventory upstream")
+	}
+	select {
+	case errDo := <-clientDone:
+		if errDo == nil {
+			t.Fatal("client request unexpectedly completed after cancellation")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("client request did not return after cancellation")
 	}
 }
 

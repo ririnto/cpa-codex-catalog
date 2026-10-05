@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -10,9 +9,12 @@ import (
 	"strings"
 
 	"github.com/ririnto/cpa-codex-catalog/internal/catalog"
+	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginapi"
 )
 
 const maxAvailableModelsResponseBytes = catalog.MaxCatalogBytes
+
+type boundedHostHTTPDo func(string, pluginapi.HTTPRequest) (pluginapi.HTTPResponse, error)
 
 func validateAvailableModelsURL(raw string) error {
 	if raw == "" || raw != strings.TrimSpace(raw) || strings.Contains(raw, "#") {
@@ -54,15 +56,18 @@ func isLoopbackHost(host string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-func fetchAvailableModels(client *http.Client, endpoint, tokenEnv string) ([]byte, error) {
-	if client == nil || validateAvailableModelsURL(endpoint) != nil {
+func fetchAvailableModels(doBounded boundedHostHTTPDo, callbackID, endpoint, tokenEnv string) ([]byte, error) {
+	if doBounded == nil || strings.TrimSpace(callbackID) == "" || validateAvailableModelsURL(endpoint) != nil {
 		return nil, errors.New("availability request unavailable")
 	}
-	request, err := http.NewRequest(http.MethodGet, endpoint, nil)
-	if err != nil {
-		return nil, errors.New("availability request unavailable")
+	request := pluginapi.HTTPRequest{
+		Method:           http.MethodGet,
+		URL:              endpoint,
+		Headers:          http.Header{"Accept": []string{"application/json"}},
+		Direct:           true,
+		DisableRedirects: true,
+		MaxResponseBytes: maxAvailableModelsResponseBytes,
 	}
-	request.Header.Set("Accept", "application/json")
 	if tokenEnv != "" {
 		if !envNamePattern.MatchString(tokenEnv) {
 			return nil, errors.New("availability request unavailable")
@@ -71,20 +76,14 @@ func fetchAvailableModels(client *http.Client, endpoint, tokenEnv string) ([]byt
 		if !exists || !bearerTokenPattern.MatchString(token) {
 			return nil, errors.New("availability request unavailable")
 		}
-		request.Header.Set("Authorization", "Bearer "+token)
+		request.Headers.Set("Authorization", "Bearer "+token)
 	}
-	// ManagementRequest has no context, so the client uses no active-request deadline.
-	response, err := client.Do(request)
+	response, err := doBounded(callbackID, request)
 	if err != nil {
 		return nil, errors.New("availability request unavailable")
 	}
-	defer response.Body.Close()
-	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices || response.ContentLength > maxAvailableModelsResponseBytes {
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices || int64(len(response.Body)) > maxAvailableModelsResponseBytes {
 		return nil, errors.New("availability request unavailable")
 	}
-	body, err := io.ReadAll(io.LimitReader(response.Body, maxAvailableModelsResponseBytes+1))
-	if err != nil || len(body) > maxAvailableModelsResponseBytes {
-		return nil, errors.New("availability request unavailable")
-	}
-	return body, nil
+	return append([]byte(nil), response.Body...), nil
 }

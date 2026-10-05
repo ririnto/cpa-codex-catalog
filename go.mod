@@ -3,7 +3,7 @@ module github.com/ririnto/cpa-codex-catalog
 go 1.26.8
 
 require (
-	github.com/router-for-me/CLIProxyAPI/v8 v8.0.13
+	github.com/router-for-me/CLIProxyAPI/v8 v8.0.15
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -135,3 +135,5 @@ require (
 )
 
 tool github.com/go-task/task/v3/cmd/task
+
+replace github.com/router-for-me/CLIProxyAPI/v8 v8.0.15 => github.com/ririnto/CLIProxyAPI/v8 v8.0.15-cpa.1
