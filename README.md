@@ -39,9 +39,17 @@ Configure the proxy API key through Codex's normal provider authentication.
 ```toml
 model = "example-model"
 model_provider = "example"
+review_model = "gpt-6-luna"
 
 [features]
 api_key_model_discovery = true
+
+[memories]
+extract_model = "gpt-6-luna"
+consolidation_model = "gpt-6-luna"
+
+[agents]
+default_subagent_model = "gpt-6-luna"
 
 [model_providers.example]
 name = "Example"
