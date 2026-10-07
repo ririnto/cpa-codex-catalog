@@ -59,19 +59,16 @@ func TestNativeHostPatchesGeneratedCodexCatalog(t *testing.T) {
 	if containsModel(models, "dormant-model") {
 		t.Fatal("a dormant slug override added a host model")
 	}
-
 	baselineConfig := setPluginEnabled(t, pluginConfig, false)
 	baseline := startProxy(t, binary, requests["codex"], baselineConfig)
 	baselineCodex := getJSONFromSeed(t, baseline, requests["codex"])
 	baselineModels := assertModelCollection(t, baselineCodex, expected["codex"])
 	assertHostMetadataPreserved(t, baselineModels[0].(map[string]any), model)
-
 	openAI := getJSONFromSeed(t, base, requests["openai"])
 	if _, exists := openAI["models"]; exists {
 		t.Fatalf("generic OpenAI inventory changed shape: %#v", openAI)
 	}
 	assertModelCollection(t, openAI, expected["openai"])
-
 	claude := getJSONFromSeed(t, base, requests["claude"])
 	assertModelCollection(t, claude, expected["claude"])
 }
