@@ -8,6 +8,7 @@ import (
 	"testing"
 )
 
+// TestExportCreatesPrivateFileAndRefusesOverwrite verifies export permissions and the default no-overwrite rule.
 func TestExportCreatesPrivateFileAndRefusesOverwrite(t *testing.T) {
 	directory := t.TempDir()
 	basePath := filepath.Join(directory, "base.json")
@@ -35,6 +36,7 @@ func TestExportCreatesPrivateFileAndRefusesOverwrite(t *testing.T) {
 	}
 }
 
+// TestExportForceReplacesAndHidesInputErrors verifies forced replacement and redaction of input paths in errors.
 func TestExportForceReplacesAndHidesInputErrors(t *testing.T) {
 	directory := t.TempDir()
 	basePath := filepath.Join(directory, "base.json")
@@ -64,6 +66,7 @@ func TestExportForceReplacesAndHidesInputErrors(t *testing.T) {
 	}
 }
 
+// TestExportForceRejectsInputAliases ensures forced output cannot replace base or override inputs through path aliases.
 func TestExportForceRejectsInputAliases(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -157,6 +160,7 @@ func TestExportForceRejectsInputAliases(t *testing.T) {
 	}
 }
 
+// TestExportRequiresExplicitBaseAndOutput verifies that export requires both input and output paths.
 func TestExportRequiresExplicitBaseAndOutput(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
