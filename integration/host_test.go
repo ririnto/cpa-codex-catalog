@@ -59,8 +59,7 @@ func TestNativeHostPatchesGeneratedCodexCatalog(t *testing.T) {
 	if containsModel(models, "dormant-model") {
 		t.Fatal("a dormant slug override added a host model")
 	}
-	baselineConfig := setPluginEnabled(t, pluginConfig, false)
-	baseline := startProxy(t, binary, requests["codex"], baselineConfig)
+	baseline := startProxy(t, binary, requests["codex"], setPluginEnabled(t, pluginConfig, false))
 	baselineCodex := getJSONFromSeed(t, baseline, requests["codex"])
 	baselineModels := assertModelCollection(t, baselineCodex, expected["codex"])
 	assertHostMetadataPreserved(t, baselineModels[0].(map[string]any), model)
