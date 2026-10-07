@@ -22,6 +22,7 @@ const (
 	pluginDirectory = "cpa-codex-catalog"
 )
 
+// TestNativeHostPatchesGeneratedCodexCatalog verifies the native host applies overrides only to its generated Codex catalog.
 func TestNativeHostPatchesGeneratedCodexCatalog(t *testing.T) {
 	binary, err := filepath.Abs(filepath.Join("..", "build", "native", "cliproxyapi-v8.0.15"))
 	if err != nil {
@@ -200,18 +201,27 @@ func isolatedEnvironment(root string) []string {
 }
 
 type modelListRequest struct {
-	Method  string            `json:"method"`
-	Path    string            `json:"path"`
+	// Method is the HTTP method used for the seeded request.
+	Method string `json:"method"`
+	// Path is the request path served by the host.
+	Path string `json:"path"`
+	// Headers contains additional headers sent with the request.
 	Headers map[string]string `json:"headers"`
 }
 
 type modelListExpectation struct {
-	Collection         string         `json:"collection"`
-	Count              int            `json:"count"`
-	Slug               string         `json:"slug"`
-	DisplayName        string         `json:"display_name"`
-	SupportsSearchTool bool           `json:"supports_search_tool"`
-	FutureMetadata     map[string]any `json:"future_metadata"`
+	// Collection names the response property containing model rows.
+	Collection string `json:"collection"`
+	// Count is the expected number of model rows in the collection.
+	Count int `json:"count"`
+	// Slug is the expected slug of the first Codex model.
+	Slug string `json:"slug"`
+	// DisplayName is the expected display name after overrides are applied.
+	DisplayName string `json:"display_name"`
+	// SupportsSearchTool is the expected search-tool capability value.
+	SupportsSearchTool bool `json:"supports_search_tool"`
+	// FutureMetadata is the expected extension metadata after applying overrides.
+	FutureMetadata map[string]any `json:"future_metadata"`
 }
 
 func getJSONFromSeed(t *testing.T, base string, seed modelListRequest) map[string]any {

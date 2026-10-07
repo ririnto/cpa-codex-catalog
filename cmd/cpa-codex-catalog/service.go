@@ -28,10 +28,14 @@ type serviceSnapshot struct {
 }
 
 type configFile struct {
-	Enabled  *bool                     `yaml:"enabled"`
-	Priority int                       `yaml:"priority"`
-	Defaults map[string]any            `yaml:"defaults"`
-	Models   map[string]map[string]any `yaml:"models"`
+	// Enabled controls whether overrides are applied; omitted values default to true.
+	Enabled *bool `yaml:"enabled"`
+	// Priority is accepted in configuration but does not affect this plugin's response handling.
+	Priority int `yaml:"priority"`
+	// Defaults contains sparse model fields merged into every generated Codex model.
+	Defaults map[string]any `yaml:"defaults"`
+	// Models contains sparse overrides keyed by exact generated model slug.
+	Models map[string]map[string]any `yaml:"models"`
 }
 
 func newPluginService() *pluginService {
@@ -96,6 +100,9 @@ func currentRegistration() registration {
 	return result
 }
 
+// InterceptResponse considers status-200, non-stream OpenAI responses with empty execution-model and request fields.
+// When enabled, it applies active sparse overrides to a generated Codex catalog and otherwise passes the response through.
+// It clears Content-Length and ETag only when the body changes, and returns patching errors without a partial response.
 func (s *pluginService) InterceptResponse(_ context.Context, request pluginapi.ResponseInterceptRequest) (pluginapi.ResponseInterceptResponse, error) {
 	passThrough := pluginapi.ResponseInterceptResponse{Headers: request.ResponseHeaders, Body: request.Body}
 	if request.StatusCode != http.StatusOK || request.Stream || request.SourceFormat != "openai" || request.Model != "" || request.RequestedModel != "" || len(request.RequestBody) != 0 || len(request.OriginalRequest) != 0 {

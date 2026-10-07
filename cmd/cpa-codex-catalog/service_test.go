@@ -17,6 +17,7 @@ import (
 
 var generatedCodexCatalog = []byte(`{"host_revision":"synthetic","models":[{"slug":"alpha","display_name":"Alpha","supported_in_api":true,"support_verbosity":false,"priority":1,"supported_reasoning_levels":[{"effort":"low","description":"Light"},{"effort":"high","description":"Deep"}],"experimental_supported_tools":[],"truncation_policy":{"mode":"tokens","limit":8192},"shell_type":"shell_command","visibility":"list","model_messages":{"instructions_template":"Host prompt","tools":{"multi_agent":{"spawn_agent":{"description":"Host description","parameters":"Host parameters"},"send_message":{"description":"Preserved tool"}}}},"future_metadata":{"enabled":true},"input_modalities":["text","image"]}]}`)
 
+// TestResponseInterceptorAppliesSparseCodexOverrides verifies defaults and exact-slug patches preserve unspecified host fields.
 func TestResponseInterceptorAppliesSparseCodexOverrides(t *testing.T) {
 	service := newPluginService()
 	config := []byte(`defaults:
@@ -80,6 +81,7 @@ models:
 	}
 }
 
+// TestResponseInterceptorOmitsStaleHeadersOnlyWhenBodyChanges verifies Content-Length and ETag are cleared only after a patch.
 func TestResponseInterceptorOmitsStaleHeadersOnlyWhenBodyChanges(t *testing.T) {
 	service := newPluginService()
 	if err := service.configure([]byte("defaults:\n  description: Patched\n")); err != nil {
@@ -132,6 +134,7 @@ func TestResponseInterceptorOmitsStaleHeadersOnlyWhenBodyChanges(t *testing.T) {
 	}
 }
 
+// TestResponseInterceptorConfiguresAndAppliesSparseNestedRequiredFields verifies config accepts fragments merged with host metadata.
 func TestResponseInterceptorConfiguresAndAppliesSparseNestedRequiredFields(t *testing.T) {
 	service := newPluginService()
 	config := []byte("defaults:\n  upgrade:\n    migration_markdown: Updated migration\n  model_messages:\n    token_budget:\n      guidance_message: Updated guidance\n")
@@ -186,6 +189,7 @@ func TestResponseInterceptorConfiguresAndAppliesSparseNestedRequiredFields(t *te
 	}
 }
 
+// TestResponseInterceptorPreservesEmptyAndDormantModels verifies empty catalogs and unmatched slug overrides remain unchanged.
 func TestResponseInterceptorPreservesEmptyAndDormantModels(t *testing.T) {
 	service := newPluginService()
 	if err := service.configure([]byte("models:\n  dormant-model:\n    display_name: Dormant\n")); err != nil {
@@ -205,6 +209,7 @@ func TestResponseInterceptorPreservesEmptyAndDormantModels(t *testing.T) {
 	}
 }
 
+// TestResponseInterceptorLeavesOtherModelListsAndExecutionsAlone verifies the response gate passes unrelated traffic through.
 func TestResponseInterceptorLeavesOtherModelListsAndExecutionsAlone(t *testing.T) {
 	service := newPluginService()
 	if err := service.configure([]byte("defaults:\n  display_name: Patched\n")); err != nil {
@@ -259,6 +264,7 @@ func TestResponseInterceptorLeavesOtherModelListsAndExecutionsAlone(t *testing.T
 	}
 }
 
+// TestConfigureRejectsInvalidCandidateAndKeepsActiveSnapshot verifies failed reconfiguration preserves the last valid overrides.
 func TestConfigureRejectsInvalidCandidateAndKeepsActiveSnapshot(t *testing.T) {
 	service := newPluginService()
 	if err := service.configure([]byte("defaults:\n  description: Active\n")); err != nil {
@@ -290,6 +296,7 @@ func TestConfigureRejectsInvalidCandidateAndKeepsActiveSnapshot(t *testing.T) {
 	}
 }
 
+// TestPluginRegistrationDeclaresResponseInterceptor verifies registration metadata advertises the interceptor and config fields.
 func TestPluginRegistrationDeclaresResponseInterceptor(t *testing.T) {
 	registration := currentRegistration()
 	if registration.Metadata.Version != "0.3.0" {
@@ -303,6 +310,7 @@ func TestPluginRegistrationDeclaresResponseInterceptor(t *testing.T) {
 	}
 }
 
+// TestHandleMethodReconfiguresInlineOverrides verifies RPC registration stores inline configuration used by interception.
 func TestHandleMethodReconfiguresInlineOverrides(t *testing.T) {
 	service = newPluginService()
 	request, err := json.Marshal(lifecycleRequest{ConfigYAML: []byte("defaults:\n  description: RPC configured\n")})
@@ -322,6 +330,7 @@ func TestHandleMethodReconfiguresInlineOverrides(t *testing.T) {
 	}
 }
 
+// TestVersionedSyntheticCatalogSeed verifies the versioned fixture produces its expected patched response.
 func TestVersionedSyntheticCatalogSeed(t *testing.T) {
 	seedDir := filepath.Join("..", "..", "integration", "testdata", "v1-synthetic")
 	generated := readSyntheticSeed(t, seedDir, "generated-codex-catalog.json")

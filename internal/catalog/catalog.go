@@ -11,6 +11,7 @@ import (
 	"strings"
 )
 
+// MaxCatalogBytes is the maximum encoded catalog size accepted by the offline Build operation.
 const MaxCatalogBytes = 1 << 20
 
 type object = map[string]any
@@ -20,7 +21,9 @@ type overrideSet struct {
 	models   object
 }
 
-// ValidateOverrides checks an inline sparse Codex model patch.
+// ValidateOverrides checks JSON defaults and exact-slug model patches as sparse Codex model overrides.
+// It accepts nested fragments that can rely on fields from the eventual host model; runtime merging validates each
+// candidate against that model, so success here does not guarantee compatibility with every host catalog.
 func ValidateOverrides(data []byte) error {
 	overrides, err := parseOverrides(data)
 	if err != nil {
@@ -45,7 +48,12 @@ func ValidateOverrides(data []byte) error {
 	return nil
 }
 
-// PatchGeneratedResponse applies sparse overrides to a host-generated Codex catalog.
+// PatchGeneratedResponse applies sparse overrides to a host-generated Codex catalog response.
+// It returns patched JSON, whether the response has the Codex catalog shape, and an error. A valid unrecognized
+// response returns nil and false; malformed JSON returns an error. For recognized catalogs, it preserves model
+// membership and order, merges defaults before exact-slug patches recursively, and replaces arrays as complete values.
+// Unknown override slugs remain dormant. Empty catalogs or catalogs with no effective patches return a copy of response;
+// invalid overrides, invalid merged models, or encoding failures return no candidate bytes.
 func PatchGeneratedResponse(response, overrideData []byte) ([]byte, bool, error) {
 	rootValue, err := decodeJSON(response)
 	if err != nil {
@@ -208,6 +216,10 @@ func validateModelPatch(patch object, slug string) error {
 	return validateModel(merged)
 }
 
+// Build validates and merges an offline base catalog with defaults and exact-slug overrides.
+// It rejects duplicate source slugs and override slugs absent from the base, preserves model order, applies defaults
+// before per-slug patches with recursive object merges and array replacement, then returns only the models field.
+// The encoded output is limited by MaxCatalogBytes; errors describe invalid input or an unrepresentable result.
 func Build(base []byte, overrides []byte) ([]byte, error) {
 	baseValue, err := decodeJSON(base)
 	if err != nil {
@@ -277,6 +289,8 @@ func Build(base []byte, overrides []byte) ([]byte, error) {
 	return out, nil
 }
 
+// Load reads the supplied base and optional override paths, then returns Build's models-only JSON.
+// An empty overridesPath uses an empty override set; read and validation errors do not include input paths.
 func Load(basePath, overridesPath string) ([]byte, error) {
 	base, err := os.ReadFile(basePath)
 	if err != nil {

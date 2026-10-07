@@ -9,6 +9,7 @@ import (
 	"testing"
 )
 
+// TestBuildOverlaysFieldsAndReturnsOnlyModels verifies recursive merging, array replacement, metadata preservation, and models-only output.
 func TestBuildOverlaysFieldsAndReturnsOnlyModels(t *testing.T) {
 	base := []byte(`{"client_version":"synthetic","fetched_at":"2030-01-01T00:00:00Z","identity":"synthetic-provider","models":[{"slug":"alpha","display_name":"Alpha","supported_reasoning_levels":[{"effort":"low","description":"Light"},{"effort":"high","description":"Deep"}],"shell_type":"shell_command","visibility":"list","supported_in_api":true,"priority":1,"support_verbosity":false,"truncation_policy":{"mode":"bytes","limit":10000},"experimental_supported_tools":[],"default_reasoning_level":"high","context_window":65536,"max_context_window":131072,"model_messages":{"instructions_template":"Base prompt","tools":{"multi_agent":{"spawn_agent":{"description":"Base tool"},"send_message":{"description":"Keep me"}}}},"extension":{"nested":{"kept":true,"array":["base"]}},"supports_parallel_tool_calls":true},{"slug":"beta","display_name":"Beta","supported_reasoning_levels":[{"effort":"low","description":"Light"}],"shell_type":"unified_exec","visibility":"list","supported_in_api":true,"priority":2,"support_verbosity":false,"truncation_policy":{"mode":"tokens","limit":8000},"experimental_supported_tools":[],"model_messages":{"instructions_template":"Beta prompt"},"extension":{"other":true}}]}`)
 	overrides := []byte(`{"defaults":{"display_name":"Custom","context_window":98304,"extension":{"nested":{"defaulted":true,"array":["default"]}},"shared":{"value":"default"}},"models":{"alpha":{"default_reasoning_level":"low","model_messages":{"tools":{"multi_agent":{"spawn_agent":{"description":"Custom tool"}}}},"extension":{"nested":{"array":["override"]}},"shared":{"value":"alpha"}}}}`)
@@ -68,6 +69,7 @@ func TestBuildOverlaysFieldsAndReturnsOnlyModels(t *testing.T) {
 	}
 }
 
+// TestBuildRejectsMalformedInputsAndPatches verifies invalid catalogs, slugs, overrides, nested fields, and JSON are rejected.
 func TestBuildRejectsMalformedInputsAndPatches(t *testing.T) {
 	base := baseWithModels(syntheticModel("alpha"))
 	modelWithoutInstructions := syntheticModel("alpha")
@@ -111,6 +113,7 @@ func TestBuildRejectsMalformedInputsAndPatches(t *testing.T) {
 	}
 }
 
+// TestValidateOverridesAcceptsSparseRequiredNestedFields verifies valid fragments may rely on fields supplied by merged models.
 func TestValidateOverridesAcceptsSparseRequiredNestedFields(t *testing.T) {
 	tests := []struct {
 		name string
@@ -150,6 +153,7 @@ func TestValidateOverridesAcceptsSparseRequiredNestedFields(t *testing.T) {
 	}
 }
 
+// TestValidateOverridesRejectsMalformedRequiredNestedFields verifies malformed types in sparse nested fields are rejected.
 func TestValidateOverridesRejectsMalformedRequiredNestedFields(t *testing.T) {
 	tests := []struct {
 		name string
@@ -181,6 +185,7 @@ func TestValidateOverridesRejectsMalformedRequiredNestedFields(t *testing.T) {
 	}
 }
 
+// TestBuildAcceptsPartialTypedMetadataAndPreservesUnknownFields verifies partial typed patches and unknown host metadata survive merging.
 func TestBuildAcceptsPartialTypedMetadataAndPreservesUnknownFields(t *testing.T) {
 	model := syntheticModel("alpha")
 	model["guardian"] = map[string]any{}
@@ -217,6 +222,7 @@ func TestBuildAcceptsPartialTypedMetadataAndPreservesUnknownFields(t *testing.T)
 	}
 }
 
+// TestBuildValidatesModelTypesAndSize verifies unsupported values and output above the offline size limit are rejected.
 func TestBuildValidatesModelTypesAndSize(t *testing.T) {
 	invalid := syntheticModel("alpha")
 	invalid["input_modalities"] = []any{"text", "video"}
@@ -235,6 +241,7 @@ func TestBuildValidatesModelTypesAndSize(t *testing.T) {
 	}
 }
 
+// TestBuildAcceptsLegacyBaseInstructions verifies legacy base_instructions satisfy the model instruction requirement.
 func TestBuildAcceptsLegacyBaseInstructions(t *testing.T) {
 	model := syntheticModel("alpha")
 	delete(model["model_messages"].(map[string]any), "instructions_template")
@@ -244,6 +251,7 @@ func TestBuildAcceptsLegacyBaseInstructions(t *testing.T) {
 	}
 }
 
+// TestPatchGeneratedResponsePreservesHostCatalogAboveExportLimit verifies runtime patching has no offline export size limit.
 func TestPatchGeneratedResponsePreservesHostCatalogAboveExportLimit(t *testing.T) {
 	model := syntheticModel("alpha")
 	model["future_metadata"] = strings.Repeat("x", MaxCatalogBytes)
@@ -270,6 +278,7 @@ func TestPatchGeneratedResponsePreservesHostCatalogAboveExportLimit(t *testing.T
 	}
 }
 
+// TestLoadReadsFilesAndRedactsPathsOnErrors verifies file loading and that read failures omit local paths.
 func TestLoadReadsFilesAndRedactsPathsOnErrors(t *testing.T) {
 	directory := t.TempDir()
 	basePath := filepath.Join(directory, "models.json")
