@@ -112,7 +112,25 @@ func (s *pluginService) InterceptResponse(_ context.Context, request pluginapi.R
 	if bytes.Equal(patched, request.Body) {
 		return passThrough, nil
 	}
+	passThrough.Headers = headersWithout(request.ResponseHeaders, "Content-Length", "ETag")
 	passThrough.Body = patched
 	passThrough.ClearHeaders = []string{"Content-Length", "ETag"}
 	return passThrough, nil
+}
+
+func headersWithout(headers http.Header, excluded ...string) http.Header {
+	filtered := make(http.Header, len(headers))
+	for name, values := range headers {
+		remove := false
+		for _, excludedName := range excluded {
+			if strings.EqualFold(name, excludedName) {
+				remove = true
+				break
+			}
+		}
+		if !remove {
+			filtered[name] = append([]string(nil), values...)
+		}
+	}
+	return filtered
 }

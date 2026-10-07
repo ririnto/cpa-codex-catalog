@@ -80,6 +80,115 @@ models:
 	}
 }
 
+func TestResponseInterceptorOmitsStaleHeadersOnlyWhenBodyChanges(t *testing.T) {
+	service := newPluginService()
+	if err := service.configure([]byte("defaults:\n  description: Patched\n")); err != nil {
+		t.Fatalf("configure() error = %v", err)
+	}
+	headers := http.Header{
+		"Content-Type":    []string{"application/json"},
+		"Content-Length":  []string{"123"},
+		"content-length":  []string{"stale duplicate"},
+		"ETag":            []string{`"old"`},
+		"eTaG":            []string{`"stale duplicate"`},
+		"X-Host-Metadata": []string{"preserve", "both values"},
+	}
+	originalHeaders := http.Header{
+		"Content-Type":    []string{"application/json"},
+		"Content-Length":  []string{"123"},
+		"content-length":  []string{"stale duplicate"},
+		"ETag":            []string{`"old"`},
+		"eTaG":            []string{`"stale duplicate"`},
+		"X-Host-Metadata": []string{"preserve", "both values"},
+	}
+	request := codexListRequest(generatedCodexCatalog)
+	request.ResponseHeaders = headers
+	response, err := service.InterceptResponse(context.Background(), request)
+	if err != nil {
+		t.Fatalf("InterceptResponse() error = %v", err)
+	}
+	if !containsString(response.ClearHeaders, "Content-Length") || !containsString(response.ClearHeaders, "ETag") {
+		t.Fatalf("changed body headers to clear = %#v", response.ClearHeaders)
+	}
+	for name := range response.Headers {
+		if strings.EqualFold(name, "Content-Length") || strings.EqualFold(name, "ETag") {
+			t.Errorf("changed response retained stale %q header", name)
+		}
+	}
+	if !reflect.DeepEqual(response.Headers["Content-Type"], []string{"application/json"}) || !reflect.DeepEqual(response.Headers["X-Host-Metadata"], []string{"preserve", "both values"}) {
+		t.Fatalf("remaining response headers = %#v", response.Headers)
+	}
+	if !reflect.DeepEqual(headers, originalHeaders) {
+		t.Fatalf("request response headers were mutated: got %#v, want %#v", headers, originalHeaders)
+	}
+
+	bypassRequest := codexListRequest([]byte(`{"object":"list","data":[]}`))
+	bypassRequest.ResponseHeaders = headers
+	bypass, err := service.InterceptResponse(context.Background(), bypassRequest)
+	if err != nil {
+		t.Fatalf("InterceptResponse() bypass error = %v", err)
+	}
+	if !reflect.DeepEqual(bypass.Headers, originalHeaders) || len(bypass.ClearHeaders) != 0 {
+		t.Fatalf("bypass headers = %#v, clear = %#v; want unchanged", bypass.Headers, bypass.ClearHeaders)
+	}
+}
+
+func TestResponseInterceptorConfiguresAndAppliesSparseNestedRequiredFields(t *testing.T) {
+	service := newPluginService()
+	config := []byte("defaults:\n  upgrade:\n    migration_markdown: Updated migration\n  model_messages:\n    token_budget:\n      guidance_message: Updated guidance\n")
+	if err := service.configure(config); err != nil {
+		t.Fatalf("configure() rejected valid sparse overrides: %v", err)
+	}
+
+	var generated map[string]any
+	if err := json.Unmarshal(generatedCodexCatalog, &generated); err != nil {
+		t.Fatalf("decode generated catalog: %v", err)
+	}
+	model := generated["models"].([]any)[0].(map[string]any)
+	model["upgrade"] = map[string]any{
+		"model":              "host-upgrade-model",
+		"migration_markdown": "Host migration",
+	}
+	modelMessages := model["model_messages"].(map[string]any)
+	modelMessages["token_budget"] = map[string]any{
+		"enabled":                             true,
+		"use_history_notes_extension":         false,
+		"reminder_threshold_tokens":           421,
+		"auto_compact_fallback_buffer_tokens": 733,
+		"reminder_message_template":           "Host reminder",
+		"guidance_message":                    "Host guidance",
+		"auto_compact_fallback_prompt":        "Host fallback",
+	}
+	body, err := json.Marshal(generated)
+	if err != nil {
+		t.Fatalf("encode generated catalog: %v", err)
+	}
+
+	response, err := service.InterceptResponse(context.Background(), codexListRequest(body))
+	if err != nil {
+		t.Fatalf("InterceptResponse() error = %v", err)
+	}
+	var result map[string]any
+	if err := json.Unmarshal(response.Body, &result); err != nil {
+		t.Fatalf("decode patched catalog: %v", err)
+	}
+	resultModel := result["models"].([]any)[0].(map[string]any)
+	upgrade := resultModel["upgrade"].(map[string]any)
+	if upgrade["model"] != "host-upgrade-model" || upgrade["migration_markdown"] != "Updated migration" {
+		t.Fatalf("upgrade fields = %#v, want patched markdown and preserved host model", upgrade)
+	}
+	tokenBudget := resultModel["model_messages"].(map[string]any)["token_budget"].(map[string]any)
+	if tokenBudget["guidance_message"] != "Updated guidance" ||
+		tokenBudget["enabled"] != true ||
+		tokenBudget["use_history_notes_extension"] != false ||
+		tokenBudget["reminder_threshold_tokens"] != float64(421) ||
+		tokenBudget["auto_compact_fallback_buffer_tokens"] != float64(733) ||
+		tokenBudget["reminder_message_template"] != "Host reminder" ||
+		tokenBudget["auto_compact_fallback_prompt"] != "Host fallback" {
+		t.Fatalf("token_budget fields = %#v, want updated guidance and preserved host fields", tokenBudget)
+	}
+}
+
 func TestResponseInterceptorPreservesEmptyAndDormantModels(t *testing.T) {
 	service := newPluginService()
 	if err := service.configure([]byte("models:\n  dormant-model:\n    display_name: Dormant\n")); err != nil {

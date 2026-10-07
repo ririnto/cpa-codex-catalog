@@ -175,6 +175,30 @@ func validateModelPatch(patch object, slug string) error {
 		"visibility":                   "list",
 		"model_messages":               object{"instructions_template": "Synthetic instructions"},
 	}
+	if _, hasUpgradePatch := patch["upgrade"].(object); hasUpgradePatch {
+		model["upgrade"] = object{
+			"model":              "Synthetic upgrade model",
+			"migration_markdown": "Synthetic migration notes",
+		}
+	}
+	if _, hasAvailabilityNuxPatch := patch["availability_nux"].(object); hasAvailabilityNuxPatch {
+		model["availability_nux"] = object{"message": "Synthetic availability message"}
+	}
+	if _, hasAccessProgramsPatch := patch["available_access_programs"].(object); hasAccessProgramsPatch {
+		model["available_access_programs"] = object{"cyber": []any{}}
+	}
+	if messages, ok := patch["model_messages"].(object); ok {
+		if _, hasTokenBudgetPatch := messages["token_budget"].(object); hasTokenBudgetPatch {
+			modelMessages := model["model_messages"].(object)
+			modelMessages["token_budget"] = object{
+				"reminder_threshold_tokens":           json.Number("1"),
+				"auto_compact_fallback_buffer_tokens": json.Number("1"),
+				"reminder_message_template":           "Synthetic reminder",
+				"guidance_message":                    "Synthetic guidance",
+				"auto_compact_fallback_prompt":        "Synthetic fallback prompt",
+			}
+		}
+	}
 	if _, hasLevels := patch["supported_reasoning_levels"]; !hasLevels {
 		if defaultEffort, ok := patch["default_reasoning_level"].(string); ok && defaultEffort != "" {
 			model["supported_reasoning_levels"] = []any{object{"effort": defaultEffort, "description": "Synthetic"}}
