@@ -121,7 +121,6 @@ func TestResponseInterceptorOmitsStaleHeadersOnlyWhenBodyChanges(t *testing.T) {
 	if !reflect.DeepEqual(headers, originalHeaders) {
 		t.Fatalf("request response headers were mutated: got %#v, want %#v", headers, originalHeaders)
 	}
-
 	bypassRequest := codexListRequest([]byte(`{"object":"list","data":[]}`))
 	bypassRequest.ResponseHeaders = headers
 	bypass, err := service.InterceptResponse(context.Background(), bypassRequest)
@@ -139,7 +138,6 @@ func TestResponseInterceptorConfiguresAndAppliesSparseNestedRequiredFields(t *te
 	if err := service.configure(config); err != nil {
 		t.Fatalf("configure() rejected valid sparse overrides: %v", err)
 	}
-
 	var generated map[string]any
 	if err := json.Unmarshal(generatedCodexCatalog, &generated); err != nil {
 		t.Fatalf("decode generated catalog: %v", err)
@@ -163,7 +161,6 @@ func TestResponseInterceptorConfiguresAndAppliesSparseNestedRequiredFields(t *te
 	if err != nil {
 		t.Fatalf("encode generated catalog: %v", err)
 	}
-
 	response, err := service.InterceptResponse(context.Background(), codexListRequest(body))
 	if err != nil {
 		t.Fatalf("InterceptResponse() error = %v", err)
