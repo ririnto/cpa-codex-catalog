@@ -1,0 +1,31 @@
+{
+  "host_revision": "synthetic-fixture-v1",
+  "models": [
+    {
+      "slug": "codex-fixture-model",
+      "display_name": "Host model",
+      "supported_in_api": true,
+      "support_verbosity": false,
+      "priority": 1,
+      "supported_reasoning_levels": [
+        {"effort": "low", "description": "Light"},
+        {"effort": "high", "description": "Deep"}
+      ],
+      "experimental_supported_tools": [],
+      "truncation_policy": {"mode": "tokens", "limit": 8192},
+      "shell_type": "shell_command",
+      "visibility": "list",
+      "model_messages": {
+        "instructions_template": "Host prompt",
+        "tools": {
+          "multi_agent": {
+            "spawn_agent": {"description": "Host description", "parameters": "Host parameters"},
+            "send_message": {"description": "Preserved tool"}
+          }
+        }
+      },
+      "future_metadata": {"origin": "synthetic"},
+      "input_modalities": ["text", "image"]
+    }
+  ]
+}

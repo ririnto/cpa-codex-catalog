@@ -95,6 +95,8 @@ func TestBuildRejectsMalformedInputsAndPatches(t *testing.T) {
 		{name: "invalid guardian policy mode type", base: base, overrides: []byte(`{"defaults":{"guardian":{"shell":7}}}`)},
 		{name: "invalid access program entry type", base: base, overrides: []byte(`{"defaults":{"available_access_programs":{"cyber":[7]}}}`)},
 		{name: "invalid upgrade model type", base: base, overrides: []byte(`{"defaults":{"upgrade":{"model":7,"migration_markdown":""}}}`)},
+		{name: "sparse upgrade without merged model", base: base, overrides: []byte(`{"defaults":{"upgrade":{"migration_markdown":"Migration notes"}}}`)},
+		{name: "sparse token budget without merged siblings", base: base, overrides: []byte(`{"defaults":{"model_messages":{"token_budget":{"guidance_message":"Token guidance"}}}}`)},
 		{name: "invalid guardian transcript sources", base: base, overrides: []byte(`{"defaults":{"model_messages":{"guardian_v2":{"transcript":{"sources":[7]}}}}}`)},
 		{name: "missing instruction template", base: baseWithModels(modelWithoutInstructions), overrides: []byte(`{}`)},
 		{name: "duplicate model slugs", base: baseWithModels(syntheticModel("alpha"), syntheticModel("alpha")), overrides: []byte(`{}`)},
@@ -104,6 +106,76 @@ func TestBuildRejectsMalformedInputsAndPatches(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			if _, err := Build(testCase.base, testCase.overrides); err == nil {
 				t.Fatal("Build() succeeded, want validation error")
+			}
+		})
+	}
+}
+
+func TestValidateOverridesAcceptsSparseRequiredNestedFields(t *testing.T) {
+	tests := []struct {
+		name string
+		data string
+	}{
+		{
+			name: "default upgrade migration markdown",
+			data: `{"defaults":{"upgrade":{"migration_markdown":"Migration notes"}}}`,
+		},
+		{
+			name: "default token budget guidance message",
+			data: `{"defaults":{"model_messages":{"token_budget":{"guidance_message":"Token guidance"}}}}`,
+		},
+		{
+			name: "per-model upgrade migration markdown",
+			data: `{"models":{"alpha":{"upgrade":{"migration_markdown":"Migration notes"}}}}`,
+		},
+		{
+			name: "per-model token budget guidance message",
+			data: `{"models":{"alpha":{"model_messages":{"token_budget":{"guidance_message":"Token guidance"}}}}}`,
+		},
+		{
+			name: "availability nux extension field",
+			data: `{"defaults":{"availability_nux":{"future_metadata":"preserve"}}}`,
+		},
+		{
+			name: "access program extension field",
+			data: `{"defaults":{"available_access_programs":{"future_metadata":"preserve"}}}`,
+		},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			if err := ValidateOverrides([]byte(testCase.data)); err != nil {
+				t.Fatalf("ValidateOverrides() rejected sparse patch: %v", err)
+			}
+		})
+	}
+}
+
+func TestValidateOverridesRejectsMalformedRequiredNestedFields(t *testing.T) {
+	tests := []struct {
+		name string
+		data string
+	}{
+		{
+			name: "upgrade migration markdown type",
+			data: `{"defaults":{"upgrade":{"migration_markdown":7}}}`,
+		},
+		{
+			name: "token budget guidance message type",
+			data: `{"defaults":{"model_messages":{"token_budget":{"guidance_message":7}}}}`,
+		},
+		{
+			name: "availability nux message type",
+			data: `{"defaults":{"availability_nux":{"message":7}}}`,
+		},
+		{
+			name: "access programs cyber type",
+			data: `{"defaults":{"available_access_programs":{"cyber":"not-an-array"}}}`,
+		},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			if err := ValidateOverrides([]byte(testCase.data)); err == nil {
+				t.Fatal("ValidateOverrides() accepted malformed field type")
 			}
 		})
 	}
@@ -169,6 +241,32 @@ func TestBuildAcceptsLegacyBaseInstructions(t *testing.T) {
 	model["base_instructions"] = "Legacy instructions"
 	if _, err := Build(baseWithModels(model), []byte(`{}`)); err != nil {
 		t.Fatalf("Build() rejected a legacy instruction template: %v", err)
+	}
+}
+
+func TestPatchGeneratedResponsePreservesHostCatalogAboveExportLimit(t *testing.T) {
+	model := syntheticModel("alpha")
+	model["future_metadata"] = strings.Repeat("x", MaxCatalogBytes)
+	response, err := json.Marshal(map[string]any{"host_revision": "synthetic", "models": []map[string]any{model}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	patched, recognized, err := PatchGeneratedResponse(response, []byte(`{"defaults":{"display_name":"Patched"}}`))
+	if err != nil {
+		t.Fatalf("PatchGeneratedResponse() error = %v", err)
+	}
+	if !recognized {
+		t.Fatal("generated Codex catalog was not recognized")
+	}
+	if len(patched) <= MaxCatalogBytes {
+		t.Fatalf("patched host catalog size = %d, want more than the offline export limit", len(patched))
+	}
+	var result map[string]any
+	if err := json.Unmarshal(patched, &result); err != nil {
+		t.Fatalf("decode patched catalog: %v", err)
+	}
+	if result["host_revision"] != "synthetic" || result["models"].([]any)[0].(map[string]any)["future_metadata"] != strings.Repeat("x", MaxCatalogBytes) {
+		t.Fatal("host metadata was not preserved")
 	}
 }
 

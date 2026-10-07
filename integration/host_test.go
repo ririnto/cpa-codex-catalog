@@ -2,339 +2,81 @@ package integration
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
-	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 )
 
-const catalogFixture = `{
-  "identity": "private-cache-identity-fixture",
-  "fetched_at": "2026-10-01T12:00:00Z",
-  "etag": "private-etag-fixture",
-  "client_version": "0.152.0",
-  "models": [
-    {
-      "slug": "codex-fixture-model",
-      "display_name": "Codex <Fixture> & Co",
-      "description": "Synthetic base description <plain> & literal",
-      "default_reasoning_level": "medium",
-      "supported_reasoning_levels": [
-        {"effort": "low", "description": "Light synthetic reasoning"},
-        {"effort": "medium", "description": "Balanced synthetic reasoning"},
-        {"effort": "high", "description": "Deep synthetic reasoning"}
-      ],
-      "shell_type": "unified_exec",
-      "visibility": "list",
-      "supported_in_api": true,
-      "priority": 12,
-      "additional_speed_tiers": ["fast"],
-      "service_tiers": [
-        {"id": "priority", "name": "Fixture priority", "description": "Synthetic service tier"}
-      ],
-      "default_service_tier": "priority",
-      "available_access_programs": null,
-      "availability_nux": {"message": "Synthetic availability notice"},
-      "upgrade": null,
-      "model_messages": {
-        "content_filter_guidance": "Synthetic filter guidance <preserved> & literal",
-        "persistent_instructions": "Synthetic persistent instruction",
-        "tools": null,
-        "instructions_template": "Base instruction stays <unchanged> & literal.",
-        "instructions_variables": null,
-        "approvals": null,
-        "collaboration_modes": null,
-        "auto_review": null,
-        "permissions": null,
-        "multi_agent": null,
-        "token_budget": null,
-        "guardian_v2": null,
-        "confirmation_policies": null
-      },
-      "include_skills_usage_instructions": true,
-      "include_plugin_usage_instructions": true,
-      "include_apps_usage_instructions": true,
-      "supports_reasoning_summary_parameter": true,
-      "default_reasoning_summary": "concise",
-      "support_verbosity": true,
-      "default_verbosity": "low",
-      "apply_patch_tool_type": "freeform",
-      "web_search_tool_type": "text",
-      "truncation_policy": {"mode": "tokens", "limit": 8192},
-      "supports_image_detail_original": true,
-      "context_window": 48000,
-      "max_context_window": 64000,
-      "auto_compact_token_limit": 42000,
-      "comp_hash": "fixture-compaction-hash",
-      "effective_context_window_percent": 85,
-      "experimental_supported_tools": ["fixture_tool"],
-      "input_modalities": ["text", "image"],
-      "supports_search_tool": false,
-      "supports_experimental_context": true,
-      "use_responses_lite": false,
-      "supports_reasoning_effort_updates": true,
-      "node_repl_auto_review_required": false,
-      "node_repl_disabled": false,
-      "auto_review_model_override": null,
-      "model_specialty": "synthetic",
-      "tool_mode": "direct",
-      "multi_agent_version": "v2",
-      "multi_agent_reasoning_effort": "high",
-      "prefer_websockets": true,
-      "minimal_client_version": "0.150.0",
-      "supports_parallel_tool_calls": true,
-      "requires_sandboxed_review": false
-    }
-  ]
-}`
+const (
+	clientKey       = "fixture-client-key"
+	fixtureModelID  = "codex-fixture-model"
+	pluginDirectory = "cpa-codex-catalog"
+)
 
-const overridesFixture = `{
-  "defaults": {"supports_search_tool": true},
-  "models": {
-    "codex-fixture-model": {
-      "display_name": "Overridden <Codex> & metadata",
-      "priority": 77
-    }
-  }
-}`
-
-const resourceBearer = "fixture-resource-bearer-token"
-const resourceBearerEnv = "CPA_CODEX_CATALOG_TEST_TOKEN"
-const resourcePath = "/v0/resource/plugins/cpa-codex-catalog/models"
-
-func TestNativeHostCodexCatalogResource(t *testing.T) {
-	binary := os.Getenv("CPA_BINARY")
-	if binary == "" {
-		t.Skip("set CPA_BINARY to a built CLIProxyAPI v8 server for native host integration")
-	}
-	fixtureDir, err := os.MkdirTemp("", "cpa-codex-catalog-integration-")
+func TestNativeHostPatchesGeneratedCodexCatalog(t *testing.T) {
+	binary, err := filepath.Abs(filepath.Join("..", "build", "native", "cliproxyapi-v8.0.15"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("resolve prepared host path: %v", err)
 	}
-	t.Cleanup(func() { _ = os.RemoveAll(fixtureDir) })
-	catalogPath := filepath.Join(fixtureDir, "catalog.json")
-	if err := os.WriteFile(catalogPath, []byte(catalogFixture), 0600); err != nil {
-		t.Fatal(err)
+	if _, err := os.Stat(binary); err != nil {
+		t.Fatalf("native integration requires prepared host artifacts; run `go tool task prepare-native` and `go tool task integration`: %v", err)
 	}
-	overridesPath := filepath.Join(fixtureDir, "overrides.json")
-	if err := os.WriteFile(overridesPath, []byte(overridesFixture), 0600); err != nil {
-		t.Fatal(err)
-	}
-	base := startProxy(t, binary, catalogPath, overridesPath)
-	t.Run("BearerProtection", func(t *testing.T) {
-		for _, token := range []string{"", "wrong-token"} {
-			status, body, headers := getResource(t, base, token)
-			if status != http.StatusUnauthorized {
-				t.Fatalf("resource status for token %q = %d, want 401: %s", token, status, body)
-			}
-			if headers.Get("WWW-Authenticate") != "Bearer" {
-				t.Fatalf("WWW-Authenticate = %q, want Bearer", headers.Get("WWW-Authenticate"))
-			}
-			if bytes.Contains(body, []byte("private-cache-identity-fixture")) {
-				t.Fatalf("unauthorized response exposed cache identity: %s", body)
-			}
-		}
-	})
-	t.Run("CatalogMetadataAndOverrides", func(t *testing.T) {
-		status, body, _ := getResource(t, base, resourceBearer)
-		if status != http.StatusOK {
-			t.Fatalf("resource status = %d, want 200: %s", status, body)
-		}
-		var root map[string]any
-		if err := json.Unmarshal(body, &root); err != nil {
-			t.Fatalf("decode catalog JSON: %v: %s", err, body)
-		}
-		for _, key := range []string{"identity", "fetched_at", "etag", "client_version"} {
-			if _, exists := root[key]; exists {
-				t.Fatalf("catalog response retained cache wrapper field %q: %s", key, body)
-			}
-		}
-		models, ok := root["models"].([]any)
-		if !ok || len(models) != 1 {
-			t.Fatalf("models = %#v, want one model", root["models"])
-		}
-		model, ok := models[0].(map[string]any)
-		if !ok {
-			t.Fatalf("model = %#v, want object", models[0])
-		}
-		if model["slug"] != "codex-fixture-model" || model["display_name"] != "Overridden <Codex> & metadata" || model["priority"] != float64(77) {
-			t.Fatalf("model override fields missing: %#v", model)
-		}
-		if model["supports_search_tool"] != true {
-			t.Fatalf("default override missing: %#v", model)
-		}
-		if model["context_window"] != float64(48000) || model["max_context_window"] != float64(64000) {
-			t.Fatalf("unspecified base context was not preserved: %#v", model)
-		}
-		messages, ok := model["model_messages"].(map[string]any)
-		if !ok || messages["instructions_template"] != "Base instruction stays <unchanged> & literal." || messages["persistent_instructions"] != "Synthetic persistent instruction" {
-			t.Fatalf("unspecified base instructions were not preserved: %#v", model["model_messages"])
-		}
-		if model["comp_hash"] != "fixture-compaction-hash" || model["minimal_client_version"] != "0.150.0" {
-			t.Fatalf("rich Codex metadata was lost: %#v", model)
-		}
-	})
-}
-
-func TestNativeHostAvailableModelsIntersection(t *testing.T) {
-	binary := os.Getenv("CPA_BINARY")
-	if binary == "" {
-		t.Skip("set CPA_BINARY to a built CLIProxyAPI v8 server for native host integration")
-	}
-	const availableTokenEnv = "CPA_CODEX_CATALOG_AVAILABLE_TEST_TOKEN"
-	const availableToken = "fixture-available-models-token"
-	var inventoryRequests atomic.Int32
-	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		inventoryRequests.Add(1)
-		if request.Method != http.MethodGet || request.URL.Path != "/v1/models" {
-			t.Errorf("inventory request = %s %s, want GET /v1/models", request.Method, request.URL.Path)
-		}
-		if request.Header.Get("Authorization") != "Bearer "+availableToken {
-			t.Errorf("inventory Authorization = %q", request.Header.Get("Authorization"))
-			http.Error(writer, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		_, _ = writer.Write([]byte(`{"object":"list","data":[{"id":"codex-fixture-model","object":"model","owned_by":"fixture"},{"id":"unknown-provider-model","object":"model","owned_by":"fixture"},{"id":"codex-fixture-model","object":"model","owned_by":"fixture"}]}`))
-	}))
-	defer upstream.Close()
-	fixtureDir, err := os.MkdirTemp("", "cpa-codex-catalog-availability-integration-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(fixtureDir) })
-	catalogPath := filepath.Join(fixtureDir, "catalog.json")
-	if err := os.WriteFile(catalogPath, []byte(catalogFixture), 0600); err != nil {
-		t.Fatal(err)
-	}
-	overridesPath := filepath.Join(fixtureDir, "overrides.json")
-	if err := os.WriteFile(overridesPath, []byte(overridesFixture), 0600); err != nil {
-		t.Fatal(err)
-	}
-	base := startProxy(t, binary, catalogPath, overridesPath, availabilityConfig{url: upstream.URL + "/v1/models", tokenEnv: availableTokenEnv, token: availableToken})
-	status, body, _ := getResource(t, base, resourceBearer)
-	if status != http.StatusOK {
-		t.Fatalf("resource status = %d, want 200: %s", status, body)
-	}
-	var result map[string]any
-	if err := json.Unmarshal(body, &result); err != nil {
-		t.Fatalf("decode filtered catalog: %v", err)
-	}
-	models, ok := result["models"].([]any)
-	if !ok || len(models) != 1 {
-		t.Fatalf("filtered models = %#v, want one exact matching model", result["models"])
+	var requests map[string]modelListRequest
+	loadSeed(t, "model-list-requests.json", &requests)
+	var expected map[string]modelListExpectation
+	loadSeed(t, "model-list-responses.expected.json", &expected)
+	pluginConfig := loadSeedBytes(t, "plugin-config.json")
+	base := startProxy(t, binary, requests["codex"], pluginConfig)
+	codex := getJSONFromSeed(t, base, requests["codex"])
+	models := assertModelCollection(t, codex, expected["codex"])
+	if len(models) == 0 {
+		t.Fatal("generated Codex catalog has no host models")
 	}
 	model := models[0].(map[string]any)
-	if model["slug"] != "codex-fixture-model" || model["display_name"] != "Overridden <Codex> & metadata" || model["supports_search_tool"] != true {
-		t.Fatalf("filtered model lost merged metadata: %#v", model)
+	if model["slug"] != expected["codex"].Slug || model["display_name"] != expected["codex"].DisplayName || model["supports_search_tool"] != expected["codex"].SupportsSearchTool {
+		t.Fatalf("generated Codex model lost its host entry or inline overrides: %#v", model)
 	}
-	if inventoryRequests.Load() == 0 {
-		t.Fatal("native host did not request the configured inventory")
+	futureMetadata, ok := model["future_metadata"].(map[string]any)
+	if !ok || !reflect.DeepEqual(futureMetadata, expected["codex"].FutureMetadata) {
+		t.Fatalf("inline unknown metadata overrides = %#v, want %#v", model["future_metadata"], expected["codex"].FutureMetadata)
 	}
+	modelMessages, exists := model["model_messages"].(map[string]any)
+	if !exists || modelMessages["instructions_template"] == "" {
+		t.Fatalf("host Codex metadata was lost: %#v", model)
+	}
+	if _, exists := model["supported_reasoning_levels"].([]any); !exists {
+		t.Fatalf("host reasoning metadata was lost: %#v", model)
+	}
+	if containsModel(models, "dormant-model") {
+		t.Fatal("a dormant slug override added a host model")
+	}
+
+	baselineConfig := setPluginEnabled(t, pluginConfig, false)
+	baseline := startProxy(t, binary, requests["codex"], baselineConfig)
+	baselineCodex := getJSONFromSeed(t, baseline, requests["codex"])
+	baselineModels := assertModelCollection(t, baselineCodex, expected["codex"])
+	assertHostMetadataPreserved(t, baselineModels[0].(map[string]any), model)
+
+	openAI := getJSONFromSeed(t, base, requests["openai"])
+	if _, exists := openAI["models"]; exists {
+		t.Fatalf("generic OpenAI inventory changed shape: %#v", openAI)
+	}
+	assertModelCollection(t, openAI, expected["openai"])
+
+	claude := getJSONFromSeed(t, base, requests["claude"])
+	assertModelCollection(t, claude, expected["claude"])
 }
 
-func TestNativeHostAvailabilityRequestCancellation(t *testing.T) {
-	binary := os.Getenv("CPA_BINARY")
-	if binary == "" {
-		t.Skip("set CPA_BINARY to a built CLIProxyAPI v8 server for native host integration")
-	}
-	const availableTokenEnv = "CPA_CODEX_CATALOG_CANCEL_TEST_TOKEN"
-	const availableToken = "fixture-cancel-token"
-	var inventoryRequests atomic.Int32
-	var inventoryStartedOnce sync.Once
-	var inventoryCanceledOnce sync.Once
-	inventoryStarted := make(chan struct{})
-	inventoryCanceled := make(chan struct{})
-	releaseUpstream := make(chan struct{})
-	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.Header.Get("Authorization") != "Bearer "+availableToken {
-			http.Error(writer, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		if inventoryRequests.Add(1) == 1 {
-			_, _ = writer.Write([]byte(`{"data":[{"id":"codex-fixture-model"}]}`))
-			return
-		}
-		inventoryStartedOnce.Do(func() { close(inventoryStarted) })
-		select {
-		case <-request.Context().Done():
-			inventoryCanceledOnce.Do(func() { close(inventoryCanceled) })
-		case <-releaseUpstream:
-		}
-	}))
-	defer func() {
-		close(releaseUpstream)
-		upstream.Close()
-	}()
-	fixtureDir, err := os.MkdirTemp("", "cpa-codex-catalog-cancel-integration-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(fixtureDir) })
-	catalogPath := filepath.Join(fixtureDir, "catalog.json")
-	if err := os.WriteFile(catalogPath, []byte(catalogFixture), 0600); err != nil {
-		t.Fatal(err)
-	}
-	overridesPath := filepath.Join(fixtureDir, "overrides.json")
-	if err := os.WriteFile(overridesPath, []byte(overridesFixture), 0600); err != nil {
-		t.Fatal(err)
-	}
-	base := startProxy(t, binary, catalogPath, overridesPath, availabilityConfig{url: upstream.URL + "/v1/models", tokenEnv: availableTokenEnv, token: availableToken})
-	requestContext, cancelRequest := context.WithCancel(context.Background())
-	defer cancelRequest()
-	request, err := http.NewRequestWithContext(requestContext, http.MethodGet, base+resourcePath+"?client_version=0.153.1", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	request.Header.Set("Authorization", "Bearer "+resourceBearer)
-	clientDone := make(chan error, 1)
-	go func() {
-		response, errDo := http.DefaultClient.Do(request)
-		if response != nil {
-			_, _ = io.Copy(io.Discard, response.Body)
-			_ = response.Body.Close()
-		}
-		clientDone <- errDo
-	}()
-	select {
-	case <-inventoryStarted:
-	case <-time.After(5 * time.Second):
-		cancelRequest()
-		t.Fatal("inventory request did not reach the blocked upstream")
-	}
-	cancelRequest()
-	select {
-	case <-inventoryCanceled:
-	case <-time.After(5 * time.Second):
-		t.Fatal("resource request cancellation did not reach the inventory upstream")
-	}
-	select {
-	case errDo := <-clientDone:
-		if errDo == nil {
-			t.Fatal("client request unexpectedly completed after cancellation")
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("client request did not return after cancellation")
-	}
-}
-
-type availabilityConfig struct {
-	url      string
-	tokenEnv string
-	token    string
-}
-
-func startProxy(t *testing.T, binary, catalogPath, overridesPath string, availability ...availabilityConfig) string {
+func startProxy(t *testing.T, binary string, codexRequest modelListRequest, pluginConfig []byte) string {
 	t.Helper()
 	root := t.TempDir()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -342,9 +84,11 @@ func startProxy(t *testing.T, binary, catalogPath, overridesPath string, availab
 		t.Fatal(err)
 	}
 	port := listener.Addr().(*net.TCPAddr).Port
-	_ = listener.Close()
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
 	pluginDir := filepath.Join(root, "plugins", runtime.GOOS, runtime.GOARCH)
-	if err := os.MkdirAll(pluginDir, 0700); err != nil {
+	if err := os.MkdirAll(pluginDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	ext := ".so"
@@ -354,26 +98,48 @@ func startProxy(t *testing.T, binary, catalogPath, overridesPath string, availab
 	if runtime.GOOS == "windows" {
 		ext = ".dll"
 	}
-	artifact, err := os.ReadFile(filepath.Join("..", "build", "plugins", runtime.GOOS, runtime.GOARCH, "cpa-codex-catalog"+ext))
+	artifact, err := os.ReadFile(filepath.Join("..", "build", "plugins", runtime.GOOS, runtime.GOARCH, pluginDirectory+ext))
 	if err != nil {
 		t.Fatalf("run go tool task build before host integration: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(pluginDir, "cpa-codex-catalog"+ext), artifact, 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(pluginDir, pluginDirectory+ext), artifact, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	authDir := filepath.Join(root, "auths")
-	if err := os.MkdirAll(authDir, 0700); err != nil {
+	if err := os.MkdirAll(authDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	config := fmt.Sprintf("config-version: 8\nserver:\n  host: 127.0.0.1\n  port: %d\nmanagement:\n  disable-control-panel: true\naccess:\n  api-keys: [fixture-client-key]\noauth:\n  auth-dir: %q\nplugins:\n  enabled: true\n  dir: %q\n  configs:\n    cpa-codex-catalog:\n      enabled: true\n      catalog_path: %q\n      overrides_path: %q\n      bearer_token_env: %q\n", port, authDir, filepath.Join(root, "plugins"), catalogPath, overridesPath, resourceBearerEnv)
-	if len(availability) > 1 {
-		t.Fatal("startProxy accepts at most one availability configuration")
+	var compactConfig bytes.Buffer
+	if err := json.Compact(&compactConfig, pluginConfig); err != nil {
+		t.Fatalf("compact synthetic plugin configuration: %v", err)
 	}
-	if len(availability) == 1 {
-		config += fmt.Sprintf("      available_models_url: %q\n      available_models_token_env: %q\n", availability[0].url, availability[0].tokenEnv)
-	}
+	config := fmt.Sprintf(`config-version: 8
+server:
+  host: 127.0.0.1
+  port: %d
+management:
+  disable-control-panel: true
+access:
+  api-keys: [%s]
+oauth:
+  auth-dir: %q
+api-keys:
+  openai-compatibility:
+    - name: fixture
+      base-url: http://127.0.0.1:1/v1
+      keys:
+        - api-key: fixture-upstream-key
+      models:
+        - name: %s
+          alias: %s
+plugins:
+  enabled: true
+  dir: %q
+  configs:
+    cpa-codex-catalog: %s
+`, port, clientKey, authDir, fixtureModelID, fixtureModelID, filepath.Join(root, "plugins"), compactConfig.String())
 	configPath := filepath.Join(root, "config.yaml")
-	if err := os.WriteFile(configPath, []byte(config), 0600); err != nil {
+	if err := os.WriteFile(configPath, []byte(config), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	logPath := filepath.Join(root, "host.log")
@@ -381,21 +147,20 @@ func startProxy(t *testing.T, binary, catalogPath, overridesPath string, availab
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	command := exec.CommandContext(ctx, binary, "--config", configPath, "--local-model")
+	command := exec.Command(binary, "--config", configPath, "--local-model")
 	command.Dir = root
-	command.Env = append(os.Environ(), resourceBearerEnv+"="+resourceBearer)
-	if len(availability) == 1 {
-		command.Env = append(command.Env, availability[0].tokenEnv+"="+availability[0].token)
-	}
+	command.Env = isolatedEnvironment(root)
 	command.Stdout = logFile
 	command.Stderr = logFile
 	if err := command.Start(); err != nil {
-		cancel()
 		_ = logFile.Close()
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { cancel(); _ = command.Wait(); _ = logFile.Close() })
+	t.Cleanup(func() {
+		_ = command.Process.Kill()
+		_ = command.Wait()
+		_ = logFile.Close()
+	})
 	base := fmt.Sprintf("http://127.0.0.1:%d", port)
 	deadline := time.NewTimer(15 * time.Second)
 	defer deadline.Stop()
@@ -405,10 +170,13 @@ func startProxy(t *testing.T, binary, catalogPath, overridesPath string, availab
 		select {
 		case <-deadline.C:
 			log, _ := os.ReadFile(logPath)
-			t.Fatalf("native host failed to load catalog resource: %s", log)
+			t.Fatalf("native host failed to load inline catalog overrides: %s", log)
 		case <-ticker.C:
-			request, _ := http.NewRequest(http.MethodGet, base+resourcePath+"?client_version=0.153.1", nil)
-			request.Header.Set("Authorization", "Bearer "+resourceBearer)
+			request, err := http.NewRequest(codexRequest.Method, base+codexRequest.Path, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Header.Set("Authorization", "Bearer "+clientKey)
 			response, err := http.DefaultClient.Do(request)
 			if err == nil {
 				_, _ = io.Copy(io.Discard, response.Body)
@@ -421,16 +189,58 @@ func startProxy(t *testing.T, binary, catalogPath, overridesPath string, availab
 	}
 }
 
-func getResource(t *testing.T, base, token string) (int, []byte, http.Header) {
+func isolatedEnvironment(root string) []string {
+	if runtime.GOOS == "windows" {
+		systemRoot := os.Getenv("SystemRoot")
+		return []string{
+			"SystemRoot=" + systemRoot,
+			"PATH=" + filepath.Join(systemRoot, "System32"),
+			"HOME=" + root,
+			"TEMP=" + root,
+			"TMP=" + root,
+		}
+	}
+	return []string{"PATH=/usr/bin:/bin", "HOME=" + root, "TMPDIR=" + root}
+}
+
+type modelListRequest struct {
+	Method  string            `json:"method"`
+	Path    string            `json:"path"`
+	Headers map[string]string `json:"headers"`
+}
+
+type modelListExpectation struct {
+	Collection         string         `json:"collection"`
+	Count              int            `json:"count"`
+	Slug               string         `json:"slug"`
+	DisplayName        string         `json:"display_name"`
+	SupportsSearchTool bool           `json:"supports_search_tool"`
+	FutureMetadata     map[string]any `json:"future_metadata"`
+}
+
+func getJSONFromSeed(t *testing.T, base string, seed modelListRequest) map[string]any {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, base+resourcePath+"?client_version=0.153.1", nil)
+	if seed.Method != http.MethodGet {
+		t.Fatalf("seed request method = %q, want GET", seed.Method)
+	}
+	headers := make(http.Header)
+	for name, value := range seed.Headers {
+		headers.Set(name, value)
+	}
+	return getJSONWithHeaders(t, base+seed.Path, headers)
+}
+
+func getJSONWithHeaders(t *testing.T, rawURL string, headers http.Header) map[string]any {
+	t.Helper()
+	request, err := http.NewRequest(http.MethodGet, rawURL, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if token != "" {
-		request.Header.Set("Authorization", "Bearer "+token)
+	request.Header.Set("Authorization", "Bearer "+clientKey)
+	for name, values := range headers {
+		for _, value := range values {
+			request.Header.Add(name, value)
+		}
 	}
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
@@ -441,5 +251,99 @@ func getResource(t *testing.T, base, token string) (int, []byte, http.Header) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return response.StatusCode, body, response.Header.Clone()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("GET %s status = %d: %s", rawURL, response.StatusCode, body)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("decode GET %s: %v: %s", rawURL, err, body)
+	}
+	return decoded
+}
+
+func loadSeed(t *testing.T, name string, value any) {
+	t.Helper()
+	if err := json.Unmarshal(loadSeedBytes(t, name), value); err != nil {
+		t.Fatalf("decode synthetic seed %q: %v", name, err)
+	}
+}
+
+func loadSeedBytes(t *testing.T, name string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("testdata", "v1-synthetic", name))
+	if err != nil {
+		t.Fatalf("read synthetic seed %q: %v", name, err)
+	}
+	return data
+}
+
+func setPluginEnabled(t *testing.T, config []byte, enabled bool) []byte {
+	t.Helper()
+	var decoded map[string]any
+	if err := json.Unmarshal(config, &decoded); err != nil {
+		t.Fatalf("decode plugin config for baseline: %v", err)
+	}
+	decoded["enabled"] = enabled
+	encoded, err := json.Marshal(decoded)
+	if err != nil {
+		t.Fatalf("encode plugin config for baseline: %v", err)
+	}
+	return encoded
+}
+
+func assertHostMetadataPreserved(t *testing.T, baseline, patched map[string]any) {
+	t.Helper()
+	pluginManagedFields := map[string]struct{}{
+		"description":          {},
+		"display_name":         {},
+		"future_metadata":      {},
+		"input_modalities":     {},
+		"supports_search_tool": {},
+	}
+	for name, value := range baseline {
+		if _, changedByConfig := pluginManagedFields[name]; changedByConfig {
+			continue
+		}
+		if name == "model_messages" {
+			baselineMessages, ok := value.(map[string]any)
+			if !ok {
+				t.Fatalf("baseline model_messages is %T, want object", value)
+			}
+			patchedMessages, ok := patched[name].(map[string]any)
+			if !ok {
+				t.Fatalf("patched model_messages is %T, want object", patched[name])
+			}
+			for messageName, messageValue := range baselineMessages {
+				if messageName == "tools" {
+					continue
+				}
+				if got, exists := patchedMessages[messageName]; !exists || !reflect.DeepEqual(got, messageValue) {
+					t.Fatalf("host model_messages.%s changed: got %#v, want %#v", messageName, got, messageValue)
+				}
+			}
+			continue
+		}
+		if got, exists := patched[name]; !exists || !reflect.DeepEqual(got, value) {
+			t.Fatalf("host model field %q changed: got %#v, want %#v", name, got, value)
+		}
+	}
+}
+
+func assertModelCollection(t *testing.T, response map[string]any, expected modelListExpectation) []any {
+	t.Helper()
+	models, ok := response[expected.Collection].([]any)
+	if !ok || len(models) != expected.Count {
+		t.Fatalf("response collection %q = %#v, want %d rows", expected.Collection, response[expected.Collection], expected.Count)
+	}
+	return models
+}
+
+func containsModel(models []any, id string) bool {
+	for _, value := range models {
+		model, ok := value.(map[string]any)
+		if ok && model["slug"] == id {
+			return true
+		}
+	}
+	return false
 }

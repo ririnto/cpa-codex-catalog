@@ -1,18 +1,17 @@
 # Codex Model Catalog for CLIProxyAPI
 
-This native CLIProxyAPI plugin serves a merged Codex model catalog through an HTTP resource route.
-It preserves source metadata and applies explicit JSON overrides without editing Codex's global configuration.
+This native CLIProxyAPI plugin applies sparse metadata overrides to the host-generated Codex model catalog.
+The host controls model membership and preserves its own routing and availability rules.
 
 ## Requirements
 
 - Go 1.26.8 or newer.
-- CLIProxyAPI fork release `v8.0.15-cpa.1`, based on upstream `v8.0.15`.
+- CLIProxyAPI release `v8.0.15` or a compatible later release.
 - A C toolchain for the native shared library build.
 - Codex configured with a provider that supports the Responses API.
 
-The module requires CLIProxyAPI SDK v8.0.15 and resolves it to the maintained fork tag `v8.0.15-cpa.1`.
-The fork supplies bounded inventory callbacks and cancellation support.
-The fork release provides the bounded, request-scoped HTTP callback required for live inventory filtering.
+The module uses the official CLIProxyAPI SDK v8.0.15.
+That release exposes a response interceptor for the generated Codex model list.
 
 ## Build and install
 
@@ -27,116 +26,85 @@ Copy it to `<plugin-root>/<GOOS>/<GOARCH>/`, where `plugin-root` is CLIProxyAPI'
 The filename without its platform extension is the plugin ID, `cpa-codex-catalog`.
 The host and plugin must use the same operating system and architecture.
 
-Enable the plugin in CLIProxyAPI configuration and set `catalog_path` to a readable JSON catalog.
-Use `config.example.yaml` as a starting point and provide local catalog files before enabling the plugin.
-Relative catalog paths resolve from the CLIProxyAPI process working directory.
-Point `catalog_path` to an existing `models_cache.json` or full catalog and keep that source file read-only.
-Operators normally maintain only the partial JSON patch named by `overrides_path`.
-The plugin loads both inputs during configuration or reconfiguration and never rewrites either input file.
+Enable the plugin in CLIProxyAPI configuration and place sparse fields under `defaults` or `models`.
+Use `config.example.yaml` as a starting point.
+The plugin reads no external catalog file and does not create a second model inventory.
+The host generates model membership from its configured providers and available credentials.
 The native plugin runs inside the CLIProxyAPI process, so install only builds you trust.
 
-The plugin serves the catalog at:
-
-```text
-GET /v0/resource/plugins/cpa-codex-catalog/models
-```
-
-Codex accepts a remote catalog URL through `model_catalog_url` on its provider configuration.
-Point it to the resource route and configure the provider's normal API key through `env_key`.
-Codex uses that provider authentication when it fetches the catalog.
-Enable `api_key_model_discovery` when the Codex version requires the feature gate for API-key providers.
-This flag was required by the tested Codex CLI 0.160.0 binary.
-If `bearer_token_env` is set in the plugin configuration, use the same environment variable name for `env_key`.
-When configured, the route accepts only an exact `Authorization: Bearer <token>` value and rejects other requests with HTTP 401.
-Without `bearer_token_env`, the route is public to clients that can reach the CLIProxyAPI listener.
-Keep the token value in the environment or a secret manager, not in either configuration file.
+The plugin intercepts CLIProxyAPI's generated `/v1/models?client_version=...` Codex response.
+Codex must use the proxy's `/v1` base URL and enable model discovery for API-key providers.
+Configure the proxy API key through Codex's normal provider authentication.
 
 ```toml
 model = "example-model"
 model_provider = "example"
+review_model = "gpt-6-luna"
 
 [features]
 api_key_model_discovery = true
 
+[memories]
+extract_model = "gpt-6-luna"
+consolidation_model = "gpt-6-luna"
+
+[agents]
+default_subagent_model = "gpt-6-luna"
+
 [model_providers.example]
 name = "Example"
 base_url = "http://127.0.0.1:8317/v1"
+model_catalog_url = "http://127.0.0.1:8317/v1/models"
 wire_api = "responses"
-model_catalog_url = "http://127.0.0.1:8317/v0/resource/plugins/cpa-codex-catalog/models"
-env_key = "CODEX_CATALOG_TOKEN"
+env_key = "CLIPROXY_API_KEY"
 ```
 
 Restart Codex after changing provider configuration.
 The [Z.AI Codex guide](https://docs.z.ai/devpack/tool/codex.md) shows the local `model_catalog_json` option and Responses setup.
 Its sample uses the older `base_instructions` field, while current Codex metadata represents prompt text under `model_messages.instructions_template`.
 Preserving a legacy field in a catalog does not guarantee that every Codex version will use it.
-Codex defines `model_catalog_url` for a remote catalog while keeping inference routing on `base_url`.
+Codex uses `model_catalog_url` for discovery and `base_url` for Responses requests.
+An `openai_base_url` override changes the built-in OpenAI endpoint.
+API-key discovery requires an explicit catalog URL when you override that endpoint.
+Use the custom provider above to fetch this plugin's catalog.
 
 ## Catalog and overrides
 
-The plugin instance defaults to enabled when the host loads native plugins.
-`catalog_path` is required and accepts an existing `models_cache.json` cache wrapper or a full `{ "models": [...] }` catalog.
-`overrides_path` is optional and points to a JSON object with optional `defaults` and `models` maps.
-Defaults apply to each source model before any matching slug override.
-Object fields merge recursively, and arrays replace the base array.
-Unknown model slugs and duplicate source slugs fail configuration.
-See [engineering contracts](docs/engineering-contracts.md) for reload, fallback, and metadata limits.
+`defaults` applies each named field to every model the host generates.
+`models` applies fields to an exact model slug after defaults.
+The plugin merges nested objects and replaces arrays.
+Overrides for unavailable slugs stay dormant and never add catalog entries.
+An empty host catalog remains empty.
+The plugin preserves host response fields and every model field that an override leaves unspecified.
 
-The resource route returns the full merged `{ "models": [...] }` catalog when availability filtering is unset.
-The override file remains a partial patch, and the plugin does not add missing models from CLIProxyAPI's bundled model list.
-The base cache or catalog is read-only, and reconfiguration is required to load changed inputs.
+The official v8.0.15 SDK does not expose the request URL or query to response interceptors.
+The plugin identifies Codex catalogs by the OpenAI source format, empty execution fields, and the generated `models[].slug` shape.
+Generic OpenAI `data[]` lists and Claude, Gemini, and Grok model lists keep their host formats.
+Execution responses and tool payloads with model identifiers bypass catalog overrides.
+When an override changes the body, the plugin clears stale `Content-Length` and `ETag` headers.
+See [engineering contracts](docs/engineering-contracts.md) for the interception and metadata limits.
 
-## Available model filtering
-
-Set `available_models_url` to filter the merged catalog against a CLIProxyAPI `/v1/models` endpoint.
-The plugin matches catalog slugs to provider `data[].id` values by exact, case-sensitive string equality.
-Codex catalog entries require `supported_in_api=true`.
-Provider rows need a string `id`.
-A missing provider `supported_in_api` flag is accepted, and explicit `false` excludes the row.
-Malformed provider rows return HTTP 503.
-The result preserves catalog order and metadata.
-Unknown provider IDs add no entries.
-The plugin fetches the inventory for each resource request and never serves stale or unfiltered results after a failure.
-It uses the host request context and a direct HTTP request with redirects disabled.
-It limits each inventory response to 1 MiB.
-An older host without the bounded callback returns HTTP 503 before the plugin fetches inventory.
-A successful empty intersection returns HTTP 200 with `{ "models": [] }`.
-An inventory error returns HTTP 503 with a fixed message.
-
-Set `available_models_token_env` to an environment variable name for outbound bearer authentication.
-The plugin reads and validates that token for each inventory request.
-This setting authenticates the inventory lookup.
-`bearer_token_env` protects the plugin resource route.
-Use HTTPS except for `localhost` or a loopback IP.
-The plugin rejects redirects, URL credentials, fragments, and `client_version` query keys.
-Errors omit upstream bodies, request URLs, and token values.
-
-The filter reflects only its configured inventory and cannot infer every provider's account entitlement.
-Copilot Bridge applies policy, picker, capability, and endpoint filters before publishing its model inventory.
-Other providers need their own authoritative discovery endpoint for account-specific availability.
-
-A metadata override file contains only the fields that need changes.
-This partial example uses a synthetic model slug.
-
-```json
-{
-  "models": {
-    "example-model": {
-      "display_name": "Example Coding Model",
-      "model_messages": {
-        "instructions_template": "Complete the requested code change and verify its behavior."
-      }
-    }
-  }
-}
+```yaml
+plugins:
+  enabled: true
+  dir: plugins
+  configs:
+    cpa-codex-catalog:
+      enabled: true
+      defaults:
+        model_messages:
+          instructions_template: "Complete the requested code change and verify its behavior."
+      models:
+        example-model:
+          display_name: Example Coding Model
 ```
 
-Use values that the model and your Codex version support.
-This route supplies Codex's catalog and replaces its bundled catalog fallback.
+Use values supported by the model and Codex version.
+Configure model behavior in CLIProxyAPI's provider settings when the provider needs matching capabilities.
 
 ## Optional local export
 
-Use `catalog-export` only when a Codex client needs a local `model_catalog_json` file instead of a remote catalog URL.
+Use `catalog-export` when a Codex client needs a local `model_catalog_json` file.
 The command builds a complete offline Codex catalog from an existing base and a partial override file.
 It refuses to replace an existing output unless you pass `--force`.
 
@@ -160,11 +128,17 @@ Run the repository checks with:
 go tool task check
 ```
 
+The check prepares the pinned SDK host, native plugin, and integration test binary before running the synthetic host cases.
+Dependency preparation may download the modules selected by `go.mod`.
+The integration run uses committed seeds under `integration/testdata/v1-synthetic` and requires no provider credentials.
+Linux runs it in a network namespace with only loopback available.
+On macOS, `sandbox-exec` permits only loopback networking and the runner isolates the child environment.
+
 See [contributing](CONTRIBUTING.md) for focused test and host integration commands.
 
 ## References
 
-- [CLIProxyAPI plugin example](https://github.com/ririnto/CLIProxyAPI/blob/v8.0.15-cpa.1/examples/plugin/simple/README.md) documents plugin discovery and resource routes.
-- [Codex provider configuration](https://github.com/openai/codex/blob/main/codex-rs/model-provider-info/src/lib.rs) defines `model_catalog_url` and provider authentication fields.
-- [Codex model catalog client](https://github.com/openai/codex/blob/main/codex-rs/codex-api/src/endpoint/models.rs) fetches the configured catalog through the provider client.
+- [CLIProxyAPI v8.0.15 plugin example](https://github.com/router-for-me/CLIProxyAPI/blob/v8.0.15/examples/plugin/simple/README.md) documents plugin discovery and interceptor capabilities.
+- [Codex provider configuration](https://github.com/openai/codex/blob/main/codex-rs/model-provider-info/src/lib.rs) defines provider settings for model discovery and authentication.
+- [Codex model catalog client](https://github.com/openai/codex/blob/main/codex-rs/codex-api/src/endpoint/models.rs) fetches model catalogs through the provider client.
 - [Codex model metadata schema](https://github.com/openai/codex/blob/main/codex-rs/protocol/src/openai_models.rs) defines current prompt metadata under `model_messages`.

@@ -15,6 +15,199 @@ const MaxCatalogBytes = 1 << 20
 
 type object = map[string]any
 
+type overrideSet struct {
+	defaults object
+	models   object
+}
+
+// ValidateOverrides checks an inline sparse Codex model patch.
+func ValidateOverrides(data []byte) error {
+	overrides, err := parseOverrides(data)
+	if err != nil {
+		return err
+	}
+	if err := validateModelPatch(overrides.defaults, "synthetic-default"); err != nil {
+		return fmt.Errorf("catalog: invalid defaults: %w", err)
+	}
+	for slug, value := range overrides.models {
+		patch, ok := value.(object)
+		if !ok {
+			return errors.New("catalog: each per-model override must be an object")
+		}
+		if strings.TrimSpace(slug) == "" {
+			return errors.New("catalog: model override slugs must be non-empty")
+		}
+		combined := merge(cloneValue(overrides.defaults).(object), patch)
+		if err := validateModelPatch(combined, slug); err != nil {
+			return fmt.Errorf("catalog: invalid model override: %w", err)
+		}
+	}
+	return nil
+}
+
+// PatchGeneratedResponse applies sparse overrides to a host-generated Codex catalog.
+func PatchGeneratedResponse(response, overrideData []byte) ([]byte, bool, error) {
+	rootValue, err := decodeJSON(response)
+	if err != nil {
+		return nil, false, errors.New("catalog: invalid generated catalog JSON")
+	}
+	root, ok := rootValue.(object)
+	if !ok {
+		return nil, false, nil
+	}
+	modelsValue, ok := root["models"]
+	if !ok {
+		return nil, false, nil
+	}
+	models, ok := modelsValue.([]any)
+	if _, genericList := root["data"]; genericList || !ok || !isCodexModels(models) {
+		return nil, false, nil
+	}
+	overrides, err := parseOverrides(overrideData)
+	if err != nil {
+		return nil, true, err
+	}
+	if len(models) == 0 || len(overrides.defaults) == 0 && len(overrides.models) == 0 {
+		return append([]byte(nil), response...), true, nil
+	}
+	changed := false
+	for index, value := range models {
+		model := value.(object)
+		slug := model["slug"].(string)
+		patchValue, hasPatch := overrides.models[slug]
+		patch, hasPatch := patchValue.(object)
+		if len(overrides.defaults) == 0 && (!hasPatch || len(patch) == 0) {
+			continue
+		}
+		merged := merge(model, overrides.defaults)
+		if hasPatch {
+			merged = merge(merged, patch)
+		}
+		if err := validateModel(merged); err != nil {
+			return nil, true, fmt.Errorf("catalog: invalid override for generated model %d", index)
+		}
+		models[index] = merged
+		changed = true
+	}
+	if !changed {
+		return append([]byte(nil), response...), true, nil
+	}
+	encoded, err := json.Marshal(root)
+	if err != nil {
+		return nil, true, errors.New("catalog: unable to encode generated model catalog")
+	}
+	return encoded, true, nil
+}
+
+func isCodexModels(models []any) bool {
+	for _, value := range models {
+		model, ok := value.(object)
+		if !ok {
+			return false
+		}
+		if slug, ok := model["slug"].(string); !ok || strings.TrimSpace(slug) == "" {
+			return false
+		}
+		if _, ok := model["model_messages"].(object); !ok {
+			return false
+		}
+		if _, ok := model["supported_reasoning_levels"].([]any); !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func parseOverrides(data []byte) (overrideSet, error) {
+	value, err := decodeJSON(data)
+	if err != nil {
+		return overrideSet{}, errors.New("catalog: invalid overrides JSON")
+	}
+	root, ok := value.(object)
+	if !ok {
+		return overrideSet{}, errors.New("catalog: overrides must be an object")
+	}
+	for key := range root {
+		if key != "defaults" && key != "models" {
+			return overrideSet{}, errors.New("catalog: overrides contain an unsupported top-level field")
+		}
+	}
+	defaults := object{}
+	if value, present := root["defaults"]; present {
+		defaults, ok = value.(object)
+		if !ok {
+			return overrideSet{}, errors.New("catalog: defaults must be an object")
+		}
+		if _, changesSlug := defaults["slug"]; changesSlug {
+			return overrideSet{}, errors.New("catalog: defaults cannot change model slugs")
+		}
+	}
+	models := object{}
+	if value, present := root["models"]; present {
+		models, ok = value.(object)
+		if !ok {
+			return overrideSet{}, errors.New("catalog: per-model overrides must be an object")
+		}
+	}
+	for slug, value := range models {
+		patch, ok := value.(object)
+		if !ok {
+			return overrideSet{}, errors.New("catalog: each per-model override must be an object")
+		}
+		if patchSlug, present := patch["slug"]; present && patchSlug != slug {
+			return overrideSet{}, errors.New("catalog: per-model override cannot change a model slug")
+		}
+	}
+	return overrideSet{defaults: defaults, models: models}, nil
+}
+
+func validateModelPatch(patch object, slug string) error {
+	model := object{
+		"slug":                         slug,
+		"display_name":                 "Synthetic model",
+		"supported_in_api":             true,
+		"support_verbosity":            false,
+		"priority":                     json.Number("1"),
+		"supported_reasoning_levels":   []any{object{"effort": "low", "description": "Synthetic"}},
+		"experimental_supported_tools": []any{},
+		"truncation_policy":            object{"mode": "tokens", "limit": json.Number("1")},
+		"shell_type":                   "shell_command",
+		"visibility":                   "list",
+		"model_messages":               object{"instructions_template": "Synthetic instructions"},
+	}
+	if _, hasUpgradePatch := patch["upgrade"].(object); hasUpgradePatch {
+		model["upgrade"] = object{
+			"model":              "Synthetic upgrade model",
+			"migration_markdown": "Synthetic migration notes",
+		}
+	}
+	if _, hasAvailabilityNuxPatch := patch["availability_nux"].(object); hasAvailabilityNuxPatch {
+		model["availability_nux"] = object{"message": "Synthetic availability message"}
+	}
+	if _, hasAccessProgramsPatch := patch["available_access_programs"].(object); hasAccessProgramsPatch {
+		model["available_access_programs"] = object{"cyber": []any{}}
+	}
+	if messages, ok := patch["model_messages"].(object); ok {
+		if _, hasTokenBudgetPatch := messages["token_budget"].(object); hasTokenBudgetPatch {
+			modelMessages := model["model_messages"].(object)
+			modelMessages["token_budget"] = object{
+				"reminder_threshold_tokens":           json.Number("1"),
+				"auto_compact_fallback_buffer_tokens": json.Number("1"),
+				"reminder_message_template":           "Synthetic reminder",
+				"guidance_message":                    "Synthetic guidance",
+				"auto_compact_fallback_prompt":        "Synthetic fallback prompt",
+			}
+		}
+	}
+	if _, hasLevels := patch["supported_reasoning_levels"]; !hasLevels {
+		if defaultEffort, ok := patch["default_reasoning_level"].(string); ok && defaultEffort != "" {
+			model["supported_reasoning_levels"] = []any{object{"effort": defaultEffort, "description": "Synthetic"}}
+		}
+	}
+	merged := merge(model, patch)
+	return validateModel(merged)
+}
+
 func Build(base []byte, overrides []byte) ([]byte, error) {
 	baseValue, err := decodeJSON(base)
 	if err != nil {
@@ -35,36 +228,12 @@ func Build(base []byte, overrides []byte) ([]byte, error) {
 	if len(models) == 0 {
 		return nil, errors.New("catalog: base catalog must contain at least one model")
 	}
-	overrideValue, err := decodeJSON(overrides)
+	overridesSet, err := parseOverrides(overrides)
 	if err != nil {
-		return nil, errors.New("catalog: invalid overrides JSON")
+		return nil, err
 	}
-	overrideRoot, ok := overrideValue.(object)
-	if !ok {
-		return nil, errors.New("catalog: overrides must be an object")
-	}
-	for key := range overrideRoot {
-		if key != "defaults" && key != "models" {
-			return nil, errors.New("catalog: overrides contain an unsupported top-level field")
-		}
-	}
-	defaults := object{}
-	if value, present := overrideRoot["defaults"]; present {
-		defaults, ok = value.(object)
-		if !ok {
-			return nil, errors.New("catalog: defaults must be an object")
-		}
-		if _, changesSlug := defaults["slug"]; changesSlug {
-			return nil, errors.New("catalog: defaults cannot change model slugs")
-		}
-	}
-	modelOverrides := object{}
-	if value, present := overrideRoot["models"]; present {
-		modelOverrides, ok = value.(object)
-		if !ok {
-			return nil, errors.New("catalog: per-model overrides must be an object")
-		}
-	}
+	defaults := overridesSet.defaults
+	modelOverrides := overridesSet.models
 	seen := make(map[string]struct{}, len(models))
 	modelsBySlug := make(map[string]object, len(models))
 	for index, value := range models {
@@ -92,16 +261,7 @@ func Build(base []byte, overrides []byte) ([]byte, error) {
 		slug := model["slug"].(string)
 		merged := merge(model, defaults)
 		if patchValue, present := modelOverrides[slug]; present {
-			patch, ok := patchValue.(object)
-			if !ok {
-				return nil, errors.New("catalog: each per-model override must be an object")
-			}
-			if patchSlug, present := patch["slug"]; present {
-				if patchSlug != slug {
-					return nil, errors.New("catalog: per-model override cannot change a model slug")
-				}
-			}
-			merged = merge(merged, patch)
+			merged = merge(merged, patchValue.(object))
 		}
 		if err := validateModel(merged); err != nil {
 			return nil, fmt.Errorf("catalog: invalid model at index %d: %w", index, err)
