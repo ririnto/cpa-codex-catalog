@@ -1041,8 +1041,7 @@ func intField(value object, field string) (int64, bool) {
 	if !present || raw == nil {
 		return 0, false
 	}
-	integer, ok := intValue(raw)
-	return integer, ok
+	return intValue(raw)
 }
 
 func intValue(value any) (int64, bool) {
