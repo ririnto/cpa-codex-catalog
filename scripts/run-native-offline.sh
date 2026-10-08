@@ -5,13 +5,13 @@ script_path=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/$(basename -- "$0")
 script_dir=$(dirname -- "$script_path")
 repo_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
 output_dir="$repo_root/build/native"
-host_binary="$output_dir/cliproxyapi-v8.0.15"
+host_binary="$output_dir/cliproxyapi-v8.0.20"
 test_binary="$output_dir/catalog-integration.test"
 marker="$output_dir/prepared.txt"
 seed_dir="$repo_root/integration/testdata/v1-synthetic"
 safe_path=/usr/sbin:/usr/bin:/sbin:/bin
 
-if [ ! -f "$marker" ] || ! grep -Fxq 'sdk=v8.0.15' "$marker" || ! grep -Fxq 'fixtures=v1-synthetic' "$marker"; then
+if [ ! -f "$marker" ] || ! grep -Fxq 'sdk=v8.0.20' "$marker" || ! grep -Fxq 'fixtures=v1-synthetic' "$marker"; then
   printf 'Native artifacts are not prepared; run `go tool task prepare-native` first.\n' >&2
   exit 1
 fi

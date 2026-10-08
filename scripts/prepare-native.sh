@@ -5,7 +5,7 @@ script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
 seed_dir="$repo_root/integration/testdata/v1-synthetic"
 output_dir="$repo_root/build/native"
-host_binary="$output_dir/cliproxyapi-v8.0.15"
+host_binary="$output_dir/cliproxyapi-v8.0.20"
 test_binary="$output_dir/catalog-integration.test"
 marker="$output_dir/prepared.txt"
 
@@ -27,8 +27,8 @@ done
 
 sdk_module=github.com/router-for-me/CLIProxyAPI/v8
 sdk_version=$(go list -mod=readonly -m -f '{{.Version}}' "$sdk_module")
-if [ "$sdk_version" != "v8.0.15" ]; then
-  printf 'Pinned host SDK is %s; expected v8.0.15\n' "$sdk_version" >&2
+if [ "$sdk_version" != "v8.0.20" ]; then
+  printf 'Pinned host SDK is %s; expected v8.0.20\n' "$sdk_version" >&2
   exit 1
 fi
 sdk_dir=$(go list -mod=readonly -m -f '{{.Dir}}' "$sdk_module")
@@ -40,4 +40,4 @@ fi
 CGO_ENABLED=1 go -C "$sdk_dir" build -mod=readonly -trimpath -buildvcs=false -o "$host_binary" ./cmd/server
 (cd "$repo_root" && go test -mod=readonly -c -o "$test_binary" ./integration)
 chmod 755 "$host_binary" "$test_binary"
-printf 'sdk=v8.0.15\nfixtures=v1-synthetic\n' > "$marker"
+printf 'sdk=v8.0.20\nfixtures=v1-synthetic\n' > "$marker"

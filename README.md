@@ -6,11 +6,11 @@ The host controls model membership and preserves its own routing and availabilit
 ## Requirements
 
 - Go 1.26.8 or newer.
-- CLIProxyAPI release `v8.0.15` or a compatible later release.
+- CLIProxyAPI release `v8.0.20`.
 - A C toolchain for the native shared library build.
 - Codex configured with a provider that supports the Responses API.
 
-The module uses the official CLIProxyAPI SDK v8.0.15.
+The module uses the official CLIProxyAPI SDK v8.0.20.
 That release exposes a response interceptor for the generated Codex model list.
 
 ## Build and install
@@ -77,7 +77,7 @@ Overrides for unavailable slugs stay dormant and never add catalog entries.
 An empty host catalog remains empty.
 The plugin preserves host response fields and every model field that an override leaves unspecified.
 
-The official v8.0.15 SDK does not expose the request URL or query to response interceptors.
+The official v8.0.20 SDK does not expose the request URL or query to response interceptors.
 The plugin identifies Codex catalogs by the OpenAI source format, empty execution fields, and the generated `models[].slug` shape.
 Generic OpenAI `data[]` lists and Claude, Gemini, and Grok model lists keep their host formats.
 Execution responses and tool payloads with model identifiers bypass catalog overrides.
@@ -138,7 +138,7 @@ See [contributing](CONTRIBUTING.md) for focused test and host integration comman
 
 ## References
 
-- [CLIProxyAPI v8.0.15 plugin example](https://github.com/router-for-me/CLIProxyAPI/blob/v8.0.15/examples/plugin/simple/README.md) documents plugin discovery and interceptor capabilities.
+- [CLIProxyAPI v8.0.20 plugin example](https://github.com/router-for-me/CLIProxyAPI/blob/v8.0.20/examples/plugin/simple/README.md) documents plugin discovery and interceptor capabilities.
 - [Codex provider configuration](https://github.com/openai/codex/blob/main/codex-rs/model-provider-info/src/lib.rs) defines provider settings for model discovery and authentication.
 - [Codex model catalog client](https://github.com/openai/codex/blob/main/codex-rs/codex-api/src/endpoint/models.rs) fetches model catalogs through the provider client.
 - [Codex model metadata schema](https://github.com/openai/codex/blob/main/codex-rs/protocol/src/openai_models.rs) defines current prompt metadata under `model_messages`.

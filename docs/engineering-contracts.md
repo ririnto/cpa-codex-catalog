@@ -20,7 +20,7 @@ Invalid reconfiguration keeps the last valid settings active.
 
 ## Interceptor selection
 
-The plugin uses the CLIProxyAPI v8.0.15 response interceptor.
+The plugin uses the CLIProxyAPI v8.0.20 response interceptor.
 The SDK does not expose the request URL or query string to this interceptor.
 The plugin selects status 200, non-stream responses with the `openai` source format.
 It also requires empty execution model fields and empty request bodies.
