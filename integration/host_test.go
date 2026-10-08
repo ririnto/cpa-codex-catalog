@@ -24,7 +24,7 @@ const (
 
 // TestNativeHostPatchesGeneratedCodexCatalog verifies the native host applies overrides only to its generated Codex catalog.
 func TestNativeHostPatchesGeneratedCodexCatalog(t *testing.T) {
-	binary, err := filepath.Abs(filepath.Join("..", "build", "native", "cliproxyapi-v8.0.15"))
+	binary, err := filepath.Abs(filepath.Join("..", "build", "native", "cliproxyapi-v8.0.20"))
 	if err != nil {
 		t.Fatalf("resolve prepared host path: %v", err)
 	}
