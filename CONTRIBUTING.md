@@ -36,3 +36,38 @@ Do not commit generated plugin binaries, local configuration, catalogs, tokens, 
 
 Document changes to catalog input, override, reload, or route behavior in `docs/engineering-contracts.md`.
 Keep operator commands and configuration examples in `README.md` and `config.example.yaml`.
+
+## Maintained prose
+
+Use one source line per complete sentence in maintained Markdown, contributor guidance, `AGENTS.md`, and `SKILL.md`.
+Separate paragraphs with blank lines and preserve spaces between words.
+Do not join independent sentences with semicolons or other punctuation.
+Preserve technical meaning, permissions, links, code, metadata, exact quotations, tables, and licenses.
+Exclude generated and vendored material from mechanical prose edits.
+
+Prefer `.yaml` when the consuming platform supports it.
+Before renaming a YAML file, check platform requirements, references, and consumers.
+Keep required `.yml` filenames and record the platform evidence in the change description.
+GitHub accepts [workflow files](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax) with either extension.
+
+## Issues and pull requests
+
+Use the repository's bug report or improvement template when opening an issue.
+Include a synthetic reproduction for bugs and concrete acceptance criteria for improvements.
+Keep credentials, catalog contents, prompt text, private paths, and conversation identifiers out of public reports.
+
+Use the pull request template and link the issue that the change resolves.
+Describe the problem, changed behavior or documentation, checks, and material limitations.
+Distinguish passing checks, failures, blocked checks, and checks not run.
+Reuse passing evidence only while relevant behavior, inputs, configuration, and tools remain unchanged.
+Review the entire posted change independently before merging.
+Follow current branch protections and required checks without bypassing them.
+After merging, verify the named base branch and close the resolved issue.
+Remove task-owned branches and temporary files only after checking reachability and recovery needs.
+
+## Commit messages
+
+Separate the subject and body with a blank line.
+Explain the reason for the change and its main changes in the body.
+Record actual checks and material limitations, including checks not run.
+Put each complete sentence on its own source line.

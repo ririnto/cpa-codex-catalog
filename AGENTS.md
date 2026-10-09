@@ -27,3 +27,4 @@
 
 - Document external compatibility against release tags or maintained branches.
 - Use commit identifiers only when exact source traceability is required by a test.
+- Follow [contribution guidance](CONTRIBUTING.md) for maintained prose, templates, commit bodies, and delivery evidence.
