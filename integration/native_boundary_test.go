@@ -80,6 +80,9 @@ func TestNativeCallbackInterceptsCatalogBeyondTwoMiB(t *testing.T) {
 	if err := json.Unmarshal(envelope.Result, &intercepted); err != nil {
 		t.Fatalf("decode native interception result: %v", err)
 	}
+	if len(intercepted.Body) <= len(catalog) {
+		t.Fatal("synthetic preserved metadata did not exercise output expansion")
+	}
 	var patched struct {
 		Padding string `json:"native_padding"`
 		Models  []struct {
@@ -147,7 +150,7 @@ func largeSyntheticCatalog(t *testing.T, base []byte, length int) []byte {
 	var catalog bytes.Buffer
 	catalog.Grow(length)
 	catalog.Write(prefix)
-	catalog.WriteString(strings.Repeat("x", paddingLength))
+	catalog.WriteString(strings.Repeat("<", paddingLength))
 	catalog.Write(suffix)
 	if catalog.Len() != length {
 		t.Fatalf("synthetic catalog length = %d, want %d", catalog.Len(), length)
