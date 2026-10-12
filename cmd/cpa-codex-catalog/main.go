@@ -71,7 +71,7 @@ import (
 
 const maxRequestBytes = 2 << 20
 
-var pluginVersion = "0.3.0"
+var pluginVersion = "dev"
 var service = newPluginService()
 
 type lifecycleRequest struct {
