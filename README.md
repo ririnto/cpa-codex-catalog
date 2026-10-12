@@ -5,7 +5,7 @@ The host controls model membership and preserves its own routing and availabilit
 
 ## Requirements
 
-- Go 1.26.8 or newer.
+- Go 1.26.9 or newer.
 - CLIProxyAPI release `v8.0.20`.
 - A C toolchain for the native shared library build.
 - Codex configured with a provider that supports the Responses API.
@@ -130,6 +130,8 @@ go tool task check
 
 The check prepares the pinned SDK host, native plugin, and integration test binary before running the synthetic host cases.
 Dependency preparation may download the modules selected by `go.mod`.
+The vulnerability scan queries the Go vulnerability database and requires network access.
+Unit tests and synthetic native integration use local fixtures and do not query that database or provider endpoints.
 The integration run uses committed seeds under `integration/testdata/v1-synthetic` and requires no provider credentials.
 Linux runs it in a network namespace with only loopback available.
 On macOS, `sandbox-exec` permits only loopback networking and the runner isolates the child environment.
