@@ -34,6 +34,11 @@ When a patch changes the body, the plugin clears `Content-Length` and `ETag`.
 The SDK selection fields are the available distinction between model lists and other responses.
 Review this gate if a future SDK adds a dedicated model-list marker.
 
+The native callback keeps a 2 MiB input limit for configuration, lifecycle, and other non-interception RPCs.
+Response-interception RPCs may exceed that limit because the SDK JSON-encodes catalog body bytes as base64.
+Every native request length must fit `C.int` before conversion to Go bytes, and larger lengths are rejected with a safe request error.
+Patched response envelopes must also fit `C.int` for the pinned host's conversion, or the callback returns a bounded error envelope.
+
 ## Model metadata
 
 Model overrides change only fields that they name.
