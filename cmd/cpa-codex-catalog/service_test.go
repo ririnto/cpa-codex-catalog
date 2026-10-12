@@ -299,7 +299,7 @@ func TestConfigureRejectsInvalidCandidateAndKeepsActiveSnapshot(t *testing.T) {
 // TestPluginRegistrationDeclaresResponseInterceptor verifies registration metadata advertises the interceptor and config fields.
 func TestPluginRegistrationDeclaresResponseInterceptor(t *testing.T) {
 	registration := currentRegistration()
-	if registration.Metadata.Version != "0.3.0" {
+	if registration.Metadata.Version != "dev" {
 		t.Fatalf("plugin version = %q", registration.Metadata.Version)
 	}
 	if !registration.Capabilities.ResponseInterceptor {

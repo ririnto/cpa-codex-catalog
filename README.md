@@ -25,6 +25,9 @@ The artifact is written to `build/plugins/<GOOS>/<GOARCH>/cpa-codex-catalog.<ext
 Copy it to `<plugin-root>/<GOOS>/<GOARCH>/`, where `plugin-root` is CLIProxyAPI's configured plugin directory.
 The filename without its platform extension is the plugin ID, `cpa-codex-catalog`.
 The host and plugin must use the same operating system and architecture.
+Source builds identify themselves as `dev` unless an explicit version is supplied.
+Use `go tool task build VERSION=<version>` when packaging a versioned plugin.
+Release builds use the version from their release tag.
 
 Enable the plugin in CLIProxyAPI configuration and place sparse fields under `defaults` or `models`.
 Use `config.example.yaml` as a starting point.
