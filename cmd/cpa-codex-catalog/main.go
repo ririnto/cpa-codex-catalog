@@ -2,6 +2,7 @@ package main
 
 /*
 #include <stdint.h>
+#include <limits.h>
 #include <stdlib.h>
 
 /// A pointer and length for request or response bytes; returned buffers use the matching API free callback.
@@ -111,8 +112,10 @@ func cliproxy_plugin_init(host *C.cliproxy_host_api, plugin *C.cliproxy_plugin_a
 // cliproxyPluginCall dispatches method using requestLen bytes at request and writes a C-allocated JSON envelope to response.
 // method must be a NUL-terminated C string, request must point to requestLen readable bytes when requestLen is positive,
 // and response must be writable. Release response.ptr with cliproxyPluginFree when it is non-nil.
+// Response-interception requests may exceed the regular request bound, but every request length must fit C.int
+// before it is converted for Go. Lifecycle and other non-interception requests remain bounded at maxRequestBytes.
 // It returns 0 when an envelope is produced, even if that envelope reports an RPC-level error; it returns 1 for
-// invalid arguments, oversized non-interception requests, or dispatch failures.
+// invalid arguments, out-of-range request lengths, oversized bounded requests, or dispatch failures.
 //
 //export cliproxyPluginCall
 func cliproxyPluginCall(method *C.char, request *C.uint8_t, requestLen C.size_t, response *C.cliproxy_buffer) C.int {
@@ -125,12 +128,7 @@ func cliproxyPluginCall(method *C.char, request *C.uint8_t, requestLen C.size_t,
 		return 1
 	}
 	methodName := C.GoString(method)
-	if uint64(requestLen) > maxRequestBytes {
-		if methodName == pluginabi.MethodResponseInterceptAfter {
-			raw, _ := successEnvelope(pluginapi.ResponseInterceptResponse{})
-			writeResponse(response, raw)
-			return 0
-		}
+	if uint64(requestLen) > uint64(C.INT_MAX) || methodName != pluginabi.MethodResponseInterceptAfter && uint64(requestLen) > maxRequestBytes {
 		writeResponse(response, errorEnvelope("invalid_request", "invalid plugin request", http.StatusBadRequest))
 		return 1
 	}
