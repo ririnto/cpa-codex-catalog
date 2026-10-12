@@ -41,6 +41,11 @@ tasks:
     cmds:
       - go vet ./...
 
+  vuln:
+    desc: Scan Go packages and the standard library for known vulnerabilities
+    cmds:
+      - go tool govulncheck ./...
+
   build:
     desc: Build the native shared library for the current platform
     env:
@@ -62,10 +67,11 @@ tasks:
       - sh scripts/prepare-native.sh
 
   check:
-    desc: Run formatting, unit tests, static checks, and required prepared native integration
+    desc: Run formatting, vulnerability checks, tests, static checks, and required prepared native integration
     cmds:
       - task: fmt-check
       - task: prepare-native
       - task: test-race
       - task: vet
+      - task: vuln
       - task: integration
