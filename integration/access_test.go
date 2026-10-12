@@ -40,7 +40,7 @@ func TestNativeHostRejectsUnauthorizedGeneratedCodexCatalogRequests(t *testing.T
 			if testCase.authorization != "" {
 				request.Header.Set("Authorization", testCase.authorization)
 			}
-			response, err := http.DefaultClient.Do(request)
+			response, err := newNativeHTTPClient(t).Do(request)
 			if err != nil {
 				t.Fatalf("request generated catalog: %v", err)
 			}

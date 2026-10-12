@@ -2,6 +2,7 @@ package integration
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -159,26 +160,27 @@ plugins:
 		_ = logFile.Close()
 	})
 	base := fmt.Sprintf("http://127.0.0.1:%d", port)
-	deadline := time.NewTimer(15 * time.Second)
-	defer deadline.Stop()
+	client := newNativeHTTPClient(t)
+	startup, cancelStartup := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancelStartup()
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		select {
-		case <-deadline.C:
+		case <-startup.Done():
 			log, _ := os.ReadFile(logPath)
 			t.Fatalf("native host failed to load inline catalog overrides: %s", log)
 		case <-ticker.C:
-			request, err := http.NewRequest(codexRequest.Method, base+codexRequest.Path, nil)
+			request, err := http.NewRequestWithContext(startup, codexRequest.Method, base+codexRequest.Path, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
 			request.Header.Set("Authorization", "Bearer "+clientKey)
-			response, err := http.DefaultClient.Do(request)
+			response, err := client.Do(request)
 			if err == nil {
-				_, _ = io.Copy(io.Discard, response.Body)
+				_, readErr := io.Copy(io.Discard, response.Body)
 				_ = response.Body.Close()
-				if response.StatusCode == http.StatusOK {
+				if readErr == nil && response.StatusCode == http.StatusOK {
 					return base
 				}
 			}
@@ -248,7 +250,7 @@ func getJSONWithHeaders(t *testing.T, rawURL string, headers http.Header) map[st
 			request.Header.Add(name, value)
 		}
 	}
-	response, err := http.DefaultClient.Do(request)
+	response, err := newNativeHTTPClient(t).Do(request)
 	if err != nil {
 		t.Fatal(err)
 	}
