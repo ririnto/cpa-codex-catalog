@@ -1,18 +1,21 @@
 # Contributing
 
-Use Go 1.26.8 or newer in the Go 1.26 toolchain and the Taskfile tasks declared by this repository.
-The Go tool directive lets you invoke the pinned Task version with `go tool task`.
+Use Go 1.26.9 or newer in the Go 1.26 toolchain and the Taskfile tasks declared by this repository.
+The Go tool directive lets you invoke the pinned Task and govulncheck versions with `go tool`.
 
 Run the focused task for the files you change.
 
 ```sh
 go tool task test
 go tool task vet
+go tool task vuln
 go tool task build
 ```
 
 Run `go tool task check` before handing off a complete change.
-It checks formatting, race-enabled tests, static analysis, the native library build, and required host integration.
+It checks formatting, known vulnerabilities, race-enabled tests, static analysis, the native library build, and required host integration.
+The vulnerability scan queries the Go vulnerability database and requires network access.
+Unit tests and prepared synthetic native integration use local fixtures and do not query that database or provider endpoints.
 
 Prepare the pinned SDK host, plugin, and integration test executable before a focused host run.
 Preparation may download dependencies.
