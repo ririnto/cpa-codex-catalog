@@ -1,8 +1,8 @@
 #!/bin/sh
 set -eu
 
-script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-repo_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+repo_root=$(CDPATH='' cd -- "$script_dir/.." && pwd)
 seed_dir="$repo_root/integration/testdata/v1-synthetic"
 output_dir="$repo_root/build/native"
 host_binary="$output_dir/cliproxyapi-v8.0.20"
@@ -17,8 +17,7 @@ for seed in \
   plugin-config.json \
   patched-codex-catalog.expected.json \
   model-list-requests.json \
-  model-list-responses.expected.json
-do
+  model-list-responses.expected.json; do
   if [ ! -s "$seed_dir/$seed" ]; then
     printf 'Missing synthetic integration seed: %s\n' "$seed_dir/$seed" >&2
     exit 1
@@ -40,4 +39,4 @@ fi
 CGO_ENABLED=1 go -C "$sdk_dir" build -mod=readonly -trimpath -buildvcs=false -o "$host_binary" ./cmd/server
 (cd "$repo_root" && go test -mod=readonly -c -o "$test_binary" ./integration)
 chmod 755 "$host_binary" "$test_binary"
-printf 'sdk=v8.0.20\nfixtures=v1-synthetic\n' > "$marker"
+printf 'sdk=v8.0.20\nfixtures=v1-synthetic\n' >"$marker"

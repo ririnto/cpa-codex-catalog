@@ -58,13 +58,13 @@ tasks:
   integration:
     desc: Run prepared synthetic native integration
     cmds:
-      - sh scripts/run-native-offline.sh
+      - sh integration/run-native-offline.sh
 
   prepare-native:
     desc: Build the pinned CLIProxyAPI host and native integration test binary
     cmds:
       - task: build
-      - sh scripts/prepare-native.sh
+      - sh integration/prepare-native.sh
 
   check:
     desc: Run formatting, vulnerability checks, tests, static checks, and required prepared native integration

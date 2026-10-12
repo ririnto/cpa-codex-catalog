@@ -1,9 +1,9 @@
 #!/bin/sh
 set -eu
 
-script_path=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/$(basename -- "$0")
+script_path=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/$(basename -- "$0")
 script_dir=$(dirname -- "$script_path")
-repo_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
+repo_root=$(CDPATH='' cd -- "$script_dir/.." && pwd)
 output_dir="$repo_root/build/native"
 host_binary="$output_dir/cliproxyapi-v8.0.20"
 test_binary="$output_dir/catalog-integration.test"
@@ -12,11 +12,11 @@ seed_dir="$repo_root/integration/testdata/v1-synthetic"
 safe_path=/usr/sbin:/usr/bin:/sbin:/bin
 
 if [ ! -f "$marker" ] || ! grep -Fxq 'sdk=v8.0.20' "$marker" || ! grep -Fxq 'fixtures=v1-synthetic' "$marker"; then
-  printf 'Native artifacts are not prepared; run `go tool task prepare-native` first.\n' >&2
+  printf 'Native artifacts are not prepared; run go tool task prepare-native first.\n' >&2
   exit 1
 fi
 if [ ! -x "$host_binary" ] || [ ! -x "$test_binary" ]; then
-  printf 'Prepared native host or integration binary is missing; run `go tool task prepare-native` first.\n' >&2
+  printf 'Prepared native host or integration binary is missing; run go tool task prepare-native first.\n' >&2
   exit 1
 fi
 for seed in \
@@ -24,8 +24,7 @@ for seed in \
   plugin-config.json \
   patched-codex-catalog.expected.json \
   model-list-requests.json \
-  model-list-responses.expected.json
-do
+  model-list-responses.expected.json; do
   if [ ! -s "$seed_dir/$seed" ]; then
     printf 'Missing synthetic integration seed: %s\n' "$seed_dir/$seed" >&2
     exit 1
