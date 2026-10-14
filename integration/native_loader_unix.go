@@ -97,10 +97,12 @@ func openNativePlugin(path string) (*nativePlugin, error) {
 	if plugin == nil {
 		if errorMessage == nil {
 			return nil, errors.New("native plugin could not be loaded")
+		} else {
+			return nil, fmt.Errorf("native plugin could not be loaded: %s", C.GoString(errorMessage))
 		}
-		return nil, fmt.Errorf("native plugin could not be loaded: %s", C.GoString(errorMessage))
+	} else {
+		return &nativePlugin{plugin: plugin}, nil
 	}
-	return &nativePlugin{plugin: plugin}, nil
 }
 
 func (plugin *nativePlugin) close() {
@@ -130,14 +132,16 @@ func (plugin *nativePlugin) callWithLength(method string, request []byte, reques
 	}
 	var response C.native_buffer
 	status := int(C.native_plugin_call(plugin.plugin, cMethod, requestPointer, nativeLength, &response))
+	if response.ptr != nil {
+		defer C.native_plugin_free_response(plugin.plugin, &response)
+	}
 	if response.ptr == nil {
 		return status, nil, nil
-	}
-	defer C.native_plugin_free_response(plugin.plugin, &response)
-	if uint64(response.len) > uint64(C.INT_MAX) {
+	} else if uint64(response.len) > uint64(C.INT_MAX) {
 		return status, nil, errors.New("native response length does not fit C.int")
+	} else {
+		return status, C.GoBytes(response.ptr, C.int(response.len)), nil
 	}
-	return status, C.GoBytes(response.ptr, C.int(response.len)), nil
 }
 
 func nativePluginCIntMax() uint64 {

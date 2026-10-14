@@ -59,71 +59,75 @@ func PatchGeneratedResponse(response, overrideData []byte) ([]byte, bool, error)
 	if err != nil {
 		return nil, false, errors.New("catalog: invalid generated catalog JSON")
 	}
-	root, ok := rootValue.(object)
-	if !ok {
-		return nil, false, nil
-	}
-	modelsValue, ok := root["models"]
-	if !ok {
-		return nil, false, nil
-	}
+	root, _ := rootValue.(object)
+	modelsValue, present := root["models"]
 	models, ok := modelsValue.([]any)
-	if _, genericList := root["data"]; genericList || !ok || !isCodexModels(models) {
+	_, genericList := root["data"]
+	if present && !genericList && ok && isCodexModels(models) {
+		return patchGeneratedCatalog(root, models, response, overrideData)
+	} else {
 		return nil, false, nil
 	}
+}
+
+func patchGeneratedCatalog(root object, models []any, response, overrideData []byte) ([]byte, bool, error) {
 	overrides, err := parseOverrides(overrideData)
 	if err != nil {
 		return nil, true, err
 	}
-	if len(models) == 0 || len(overrides.defaults) == 0 && len(overrides.models) == 0 {
-		return append([]byte(nil), response...), true, nil
-	}
 	changed := false
-	for index, value := range models {
-		model := value.(object)
+	for index := 0; index < len(models) && (len(overrides.defaults) != 0 || len(overrides.models) != 0); index++ {
+		model := models[index].(object)
 		slug := model["slug"].(string)
-		patchValue, hasPatch := overrides.models[slug]
-		patch, hasPatch := patchValue.(object)
-		if len(overrides.defaults) == 0 && (!hasPatch || len(patch) == 0) {
-			continue
-		}
-		merged := merge(model, overrides.defaults)
-		if hasPatch {
-			merged = merge(merged, patch)
-		}
-		if err := validateModel(merged); err != nil {
+		patch, _ := overrides.models[slug].(object)
+		merged, modelChanged, err := patchGeneratedModel(model, overrides.defaults, patch)
+		if err != nil {
 			return nil, true, fmt.Errorf("catalog: invalid override for generated model %d", index)
 		}
 		models[index] = merged
-		changed = true
+		changed = changed || modelChanged
 	}
-	if !changed {
+	if changed {
+		encoded, err := json.Marshal(root)
+		if err != nil {
+			return nil, true, errors.New("catalog: unable to encode generated model catalog")
+		} else {
+			return encoded, true, nil
+		}
+	} else {
 		return append([]byte(nil), response...), true, nil
 	}
-	encoded, err := json.Marshal(root)
-	if err != nil {
-		return nil, true, errors.New("catalog: unable to encode generated model catalog")
+}
+
+func patchGeneratedModel(model, defaults, patch object) (object, bool, error) {
+	if len(defaults) != 0 || len(patch) != 0 {
+		merged := merge(model, defaults)
+		if patch != nil {
+			merged = merge(merged, patch)
+		}
+		return merged, true, validateModel(merged)
+	} else {
+		return model, false, nil
 	}
-	return encoded, true, nil
 }
 
 func isCodexModels(models []any) bool {
-	for _, value := range models {
-		model, ok := value.(object)
-		if !ok {
-			return false
+	valid := true
+	for index := 0; index < len(models) && valid; index++ {
+		model, ok := models[index].(object)
+		valid = ok
+		if valid {
+			slug, ok := model["slug"].(string)
+			valid = ok && strings.TrimSpace(slug) != ""
 		}
-		if slug, ok := model["slug"].(string); !ok || strings.TrimSpace(slug) == "" {
-			return false
+		if valid {
+			_, valid = model["model_messages"].(object)
 		}
-		if _, ok := model["model_messages"].(object); !ok {
-			return false
-		}
-		if _, ok := model["supported_reasoning_levels"].([]any); !ok {
-			return false
+		if valid {
+			_, valid = model["supported_reasoning_levels"].([]any)
 		}
 	}
-	return true
+	return valid
 }
 
 func parseOverrides(data []byte) (overrideSet, error) {
@@ -282,11 +286,11 @@ func Build(base []byte, overrides []byte) ([]byte, error) {
 	out, err := json.Marshal(object{"models": models})
 	if err != nil {
 		return nil, errors.New("catalog: unable to encode merged models")
-	}
-	if len(out) > MaxCatalogBytes {
+	} else if len(out) > MaxCatalogBytes {
 		return nil, errors.New("catalog: merged model catalog exceeds the 1 MiB limit")
+	} else {
+		return out, nil
 	}
-	return out, nil
 }
 
 // Load reads the supplied base and optional override paths, then returns Build's models-only JSON.
@@ -312,11 +316,11 @@ func decodeJSON(data []byte) (any, error) {
 	value, err := decodeValue(decoder)
 	if err != nil {
 		return nil, err
-	}
-	if _, err := decoder.Token(); err != io.EOF {
+	} else if _, err := decoder.Token(); err != io.EOF {
 		return nil, errors.New("trailing JSON data")
+	} else {
+		return value, nil
 	}
-	return value, nil
 }
 
 func decodeValue(decoder *json.Decoder) (any, error) {
@@ -324,65 +328,63 @@ func decodeValue(decoder *json.Decoder) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if delimiter, ok := token.(json.Delim); ok {
-		switch delimiter {
-		case '{':
-			value := object{}
-			for decoder.More() {
-				keyToken, err := decoder.Token()
-				if err != nil {
-					return nil, err
-				}
-				key, ok := keyToken.(string)
-				if !ok {
-					return nil, errors.New("invalid JSON object key")
-				}
-				if _, exists := value[key]; exists {
-					return nil, errors.New("duplicate JSON object key")
-				}
-				child, err := decodeValue(decoder)
-				if err != nil {
-					return nil, err
-				}
-				value[key] = child
+	delimiter, isDelimiter := token.(json.Delim)
+	switch {
+	case !isDelimiter:
+		return token, nil
+	case delimiter == '{':
+		value := object{}
+		for decoder.More() {
+			keyToken, err := decoder.Token()
+			if err != nil {
+				return nil, err
 			}
-			end, err := decoder.Token()
-			if err != nil || end != json.Delim('}') {
-				return nil, errors.New("invalid JSON object")
+			key, ok := keyToken.(string)
+			if !ok {
+				return nil, errors.New("invalid JSON object key")
 			}
-			return value, nil
-		case '[':
-			value := []any{}
-			for decoder.More() {
-				child, err := decodeValue(decoder)
-				if err != nil {
-					return nil, err
-				}
-				value = append(value, child)
+			if _, exists := value[key]; exists {
+				return nil, errors.New("duplicate JSON object key")
 			}
-			end, err := decoder.Token()
-			if err != nil || end != json.Delim(']') {
-				return nil, errors.New("invalid JSON array")
+			child, err := decodeValue(decoder)
+			if err != nil {
+				return nil, err
 			}
-			return value, nil
-		default:
-			return nil, errors.New("invalid JSON delimiter")
+			value[key] = child
 		}
+		end, err := decoder.Token()
+		if err != nil || end != json.Delim('}') {
+			return nil, errors.New("invalid JSON object")
+		}
+		return value, nil
+	case delimiter == '[':
+		value := []any{}
+		for decoder.More() {
+			child, err := decodeValue(decoder)
+			if err != nil {
+				return nil, err
+			}
+			value = append(value, child)
+		}
+		end, err := decoder.Token()
+		if err != nil || end != json.Delim(']') {
+			return nil, errors.New("invalid JSON array")
+		}
+		return value, nil
+	default:
+		return nil, errors.New("invalid JSON delimiter")
 	}
-	return token, nil
 }
 
 func merge(base object, patch object) object {
 	for key, patchValue := range patch {
-		if baseValue, exists := base[key]; exists {
-			baseObject, baseIsObject := baseValue.(object)
-			patchObject, patchIsObject := patchValue.(object)
-			if baseIsObject && patchIsObject {
-				base[key] = merge(baseObject, patchObject)
-				continue
-			}
+		baseObject, baseIsObject := base[key].(object)
+		patchObject, patchIsObject := patchValue.(object)
+		if baseIsObject && patchIsObject {
+			base[key] = merge(baseObject, patchObject)
+		} else {
+			base[key] = cloneValue(patchValue)
 		}
-		base[key] = cloneValue(patchValue)
 	}
 	return base
 }
@@ -532,23 +534,23 @@ func validateModel(model object) error {
 	}
 	if err := validateOptionalObjectValue(model, "model_messages", validateModelMessages); err != nil {
 		return err
-	}
-	if !hasInstructionTemplate(model) {
+	} else if !hasInstructionTemplate(model) {
 		return errors.New("model requires model_messages.instructions_template or legacy base_instructions")
+	} else {
+		return nil
 	}
-	return nil
 }
 
 func hasInstructionTemplate(model object) bool {
-	if _, ok := model["base_instructions"].(string); ok {
-		return true
+	_, hasTemplate := model["base_instructions"].(string)
+	var messages object
+	if !hasTemplate {
+		messages, _ = model["model_messages"].(object)
 	}
-	messages, ok := model["model_messages"].(object)
-	if !ok {
-		return false
+	if messages != nil {
+		_, hasTemplate = messages["instructions_template"].(string)
 	}
-	_, ok = messages["instructions_template"].(string)
-	return ok
+	return hasTemplate
 }
 
 func validateReasoningLevels(model object) error {
@@ -595,8 +597,9 @@ func validateTruncationPolicy(value any) error {
 	limit, ok := intValue(policy["limit"])
 	if !ok || limit <= 0 {
 		return errors.New("truncation_policy limit must be a positive integer")
+	} else {
+		return nil
 	}
-	return nil
 }
 
 func validateServiceTiers(value any) error {
@@ -662,18 +665,19 @@ func validateGuardianPolicy(policy object) error {
 	}
 	if err := validateNullableBoolFields(policy, "initial_cua_call", "sandboxed_exec_commands"); err != nil {
 		return fmt.Errorf("guardian.%w", err)
+	} else {
+		return nil
 	}
-	return nil
 }
 
 func validateAccessPrograms(programs object) error {
 	if err := requireArray(programs, "cyber"); err != nil {
 		return fmt.Errorf("available_access_programs.%w", err)
-	}
-	if err := validateStringArray("cyber", programs["cyber"]); err != nil {
+	} else if err := validateStringArray("cyber", programs["cyber"]); err != nil {
 		return fmt.Errorf("available_access_programs.%w", err)
+	} else {
+		return nil
 	}
-	return nil
 }
 
 func validateUpgrade(upgrade object) error {
@@ -688,30 +692,24 @@ func validateUpgrade(upgrade object) error {
 func validateToolMessages(tools object) error {
 	if err := validateOptionalObjectValue(tools, "indirect_description_prefixes", validateIndirectDescriptionPrefixes); err != nil {
 		return fmt.Errorf("tools.%w", err)
-	}
-	if err := validateOptionalObjectValue(tools, "send_user_message_async", validateToolMessage); err != nil {
+	} else if err := validateOptionalObjectValue(tools, "send_user_message_async", validateToolMessage); err != nil {
 		return fmt.Errorf("tools.%w", err)
-	}
-	if err := validateOptionalObjectValue(tools, "multi_agent", validateMultiAgentToolMessages); err != nil {
+	} else if err := validateOptionalObjectValue(tools, "multi_agent", validateMultiAgentToolMessages); err != nil {
 		return fmt.Errorf("tools.%w", err)
-	}
-	if err := validateOptionalObjectValue(tools, "code_mode", validateCodeModeToolMessages); err != nil {
+	} else if err := validateOptionalObjectValue(tools, "code_mode", validateCodeModeToolMessages); err != nil {
 		return fmt.Errorf("tools.%w", err)
-	}
-	if err := validateOptionalObjectValue(tools, "mcp_resources", validateMcpResourceToolMessages); err != nil {
+	} else if err := validateOptionalObjectValue(tools, "mcp_resources", validateMcpResourceToolMessages); err != nil {
 		return fmt.Errorf("tools.%w", err)
+	} else {
+		return nil
 	}
-	return nil
 }
 
 func validateIndirectDescriptionPrefixes(prefixes object) error {
 	for _, field := range []string{"namespaces", "mcp_servers"} {
 		raw, present := prefixes[field]
-		if !present || raw == nil {
-			continue
-		}
 		values, ok := raw.(object)
-		if !ok {
+		if present && raw != nil && !ok {
 			return fmt.Errorf("indirect_description_prefixes.%s must be an object or null", field)
 		}
 		for _, value := range values {
@@ -726,8 +724,9 @@ func validateIndirectDescriptionPrefixes(prefixes object) error {
 func validateToolMessage(message object) error {
 	if err := validateOptionalStringFields(message, "description", "parameters"); err != nil {
 		return fmt.Errorf("tool message.%w", err)
+	} else {
+		return nil
 	}
-	return nil
 }
 
 func validateMultiAgentToolMessages(messages object) error {
@@ -780,11 +779,11 @@ func validatePermissionMessages(messages object) error {
 func validateMultiAgentMessages(messages object) error {
 	if err := validateOptionalObjectValue(messages, "role", validateMultiAgentRoleMessages); err != nil {
 		return fmt.Errorf("multi_agent.%w", err)
-	}
-	if err := validateOptionalObjectValue(messages, "mode", validateMultiAgentModeMessages); err != nil {
+	} else if err := validateOptionalObjectValue(messages, "mode", validateMultiAgentModeMessages); err != nil {
 		return fmt.Errorf("multi_agent.%w", err)
+	} else {
+		return nil
 	}
-	return nil
 }
 
 func validateMultiAgentRoleMessages(messages object) error {
@@ -832,14 +831,13 @@ func validateGuardianV2(config object) error {
 	}
 	if err := validateOptionalUnsignedInt(config, "review_threshold_basis_points", 16); err != nil {
 		return fmt.Errorf("guardian_v2.%w", err)
-	}
-	if err := validateNullableBoolFields(config, "reuse_parent_compaction"); err != nil {
+	} else if err := validateNullableBoolFields(config, "reuse_parent_compaction"); err != nil {
 		return fmt.Errorf("guardian_v2.%w", err)
-	}
-	if err := validateOptionalObjectValue(config, "transcript", validateGuardianV2Transcript); err != nil {
+	} else if err := validateOptionalObjectValue(config, "transcript", validateGuardianV2Transcript); err != nil {
 		return fmt.Errorf("guardian_v2.%w", err)
+	} else {
+		return nil
 	}
-	return nil
 }
 
 func validateGuardianV2Transcript(transcript object) error {
@@ -864,18 +862,19 @@ func validateConfirmationPolicies(policies object) error {
 }
 
 func validateOptionalObjectValue(value object, field string, validate func(object) error) error {
-	raw, present := value[field]
-	if !present || raw == nil {
-		return nil
-	}
-	nested, ok := raw.(object)
-	if !ok {
+	var err error
+	switch raw := value[field].(type) {
+	case nil:
+	case object:
+		err = validate(raw)
+	default:
 		return fmt.Errorf("%s must be an object or null", field)
 	}
-	if err := validate(nested); err != nil {
+	if err != nil {
 		return fmt.Errorf("%s.%w", field, err)
+	} else {
+		return nil
 	}
-	return nil
 }
 
 func validateOptionalStringFields(value object, fields ...string) error {
@@ -888,24 +887,19 @@ func validateOptionalStringFields(value object, fields ...string) error {
 }
 
 func validateOptionalReasoningEffort(value object, field string) error {
-	raw, present := value[field]
-	if !present || raw == nil {
+	raw := value[field]
+	effort, ok := raw.(string)
+	if raw != nil && (!ok || effort == "") {
+		return fmt.Errorf("%s must be a non-empty string or null", field)
+	} else {
 		return nil
 	}
-	effort, ok := raw.(string)
-	if !ok || effort == "" {
-		return fmt.Errorf("%s must be a non-empty string or null", field)
-	}
-	return nil
 }
 
 func validateNullableBoolFields(value object, fields ...string) error {
 	for _, field := range fields {
-		raw, present := value[field]
-		if !present || raw == nil {
-			continue
-		}
-		if _, ok := raw.(bool); !ok {
+		raw := value[field]
+		if _, ok := raw.(bool); raw != nil && !ok {
 			return fmt.Errorf("%s must be a boolean or null", field)
 		}
 	}
@@ -913,69 +907,70 @@ func validateNullableBoolFields(value object, fields ...string) error {
 }
 
 func validateOptionalUnsignedInt(value object, field string, bits int) error {
-	raw, present := value[field]
-	if !present || raw == nil {
+	var err error
+	switch raw := value[field].(type) {
+	case nil:
+	case json.Number:
+		_, err = strconv.ParseUint(string(raw), 10, bits)
+	default:
+		return fmt.Errorf("%s must be an unsigned integer or null", field)
+	}
+	if err != nil {
+		return fmt.Errorf("%s must be an unsigned integer or null", field)
+	} else {
 		return nil
 	}
-	number, ok := raw.(json.Number)
-	if !ok {
-		return fmt.Errorf("%s must be an unsigned integer or null", field)
-	}
-	if _, err := strconv.ParseUint(string(number), 10, bits); err != nil {
-		return fmt.Errorf("%s must be an unsigned integer or null", field)
-	}
-	return nil
 }
 
 func validateMessageObject(value any, field string) error {
 	message, ok := value.(object)
 	if !ok {
 		return fmt.Errorf("%s must be an object or null", field)
-	}
-	if _, ok := message["message"].(string); !ok {
+	} else if _, ok := message["message"].(string); !ok {
 		return fmt.Errorf("%s.message must be a string", field)
+	} else {
+		return nil
 	}
-	return nil
 }
 
 func validateEnum(value object, field string, required bool, nullable bool, allowed ...string) error {
 	raw, present := value[field]
-	if !present {
-		if !required {
-			return nil
-		}
+	if !present && required {
 		return fmt.Errorf("%s is required", field)
 	}
-	if raw == nil {
-		if nullable {
-			return nil
-		}
+	if present && raw == nil && !nullable {
 		return fmt.Errorf("%s must be a string", field)
 	}
 	text, ok := raw.(string)
-	if !ok {
+	if present && raw != nil && !ok {
 		return fmt.Errorf("%s must be a string", field)
 	}
-	for _, candidate := range allowed {
-		if text == candidate {
-			return nil
+	if present && raw != nil {
+		index := 0
+		for index < len(allowed) && text != allowed[index] {
+			index++
+		}
+		if index == len(allowed) {
+			return fmt.Errorf("%s has an unsupported value", field)
 		}
 	}
-	return fmt.Errorf("%s has an unsupported value", field)
+	return nil
 }
 
 func requireString(value object, field string) error {
 	if _, ok := value[field].(string); !ok {
 		return fmt.Errorf("%s is required and must be a string", field)
+	} else {
+		return nil
 	}
-	return nil
 }
 
 func requireBool(value object, field string) error {
 	if _, ok := value[field].(bool); !ok {
 		return fmt.Errorf("%s is required and must be a boolean", field)
+	} else {
+		return nil
 	}
-	return nil
 }
 
 func requireInt(value object, field string, bits int) error {
@@ -985,56 +980,57 @@ func requireInt(value object, field string, bits int) error {
 	parsed, _ := intValue(value[field])
 	if bits == 32 && (parsed < -1<<31 || parsed > 1<<31-1) {
 		return fmt.Errorf("%s is outside the supported range", field)
+	} else {
+		return nil
 	}
-	return nil
 }
 
 func requireArray(value object, field string) error {
 	if _, ok := value[field].([]any); !ok {
 		return fmt.Errorf("%s is required and must be an array", field)
+	} else {
+		return nil
 	}
-	return nil
 }
 
 func requireObject(value object, field string) error {
 	if _, ok := value[field].(object); !ok {
 		return fmt.Errorf("%s is required and must be an object", field)
+	} else {
+		return nil
 	}
-	return nil
 }
 
 func validateOptionalString(value object, field string) error {
-	raw, present := value[field]
-	if !present || raw == nil {
+	raw := value[field]
+	if _, ok := raw.(string); raw != nil && !ok {
+		return fmt.Errorf("%s must be a string or null", field)
+	} else {
 		return nil
 	}
-	if _, ok := raw.(string); !ok {
-		return fmt.Errorf("%s must be a string or null", field)
-	}
-	return nil
 }
 
 func validateOptionalBool(value object, field string) error {
 	raw, present := value[field]
-	if !present {
+	if _, ok := raw.(bool); present && !ok {
+		return fmt.Errorf("%s must be a boolean", field)
+	} else {
 		return nil
 	}
-	if _, ok := raw.(bool); !ok {
-		return fmt.Errorf("%s must be a boolean", field)
-	}
-	return nil
 }
 
 func validateOptionalPositiveInt(value object, field string) error {
-	raw, present := value[field]
-	if !present || raw == nil {
+	raw := value[field]
+	var integer int64
+	var ok bool
+	if raw != nil {
+		integer, ok = intValue(raw)
+	}
+	if raw != nil && (!ok || integer <= 0) {
+		return fmt.Errorf("%s must be a positive integer or null", field)
+	} else {
 		return nil
 	}
-	integer, ok := intValue(raw)
-	if !ok || integer <= 0 {
-		return fmt.Errorf("%s must be a positive integer or null", field)
-	}
-	return nil
 }
 
 func validateStringArray(field string, value any) error {
@@ -1051,18 +1047,21 @@ func validateStringArray(field string, value any) error {
 }
 
 func intField(value object, field string) (int64, bool) {
-	raw, present := value[field]
-	if !present || raw == nil {
-		return 0, false
+	var integer int64
+	var ok bool
+	if raw := value[field]; raw != nil {
+		integer, ok = intValue(raw)
 	}
-	return intValue(raw)
+	return integer, ok
 }
 
 func intValue(value any) (int64, bool) {
 	number, ok := value.(json.Number)
-	if !ok {
-		return 0, false
+	var integer int64
+	if ok {
+		var err error
+		integer, err = strconv.ParseInt(string(number), 10, 64)
+		ok = err == nil
 	}
-	integer, err := strconv.ParseInt(string(number), 10, 64)
-	return integer, err == nil
+	return integer, ok
 }

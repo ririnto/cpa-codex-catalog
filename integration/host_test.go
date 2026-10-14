@@ -165,7 +165,8 @@ plugins:
 	defer cancelStartup()
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
-	for {
+	readyURL := ""
+	for readyURL == "" {
 		select {
 		case <-startup.Done():
 			log, _ := os.ReadFile(logPath)
@@ -181,25 +182,29 @@ plugins:
 				_, readErr := io.Copy(io.Discard, response.Body)
 				_ = response.Body.Close()
 				if readErr == nil && response.StatusCode == http.StatusOK {
-					return base
+					readyURL = base
 				}
 			}
 		}
 	}
+	return readyURL
 }
 
 func isolatedEnvironment(root string) []string {
+	var environment []string
 	if runtime.GOOS == "windows" {
 		systemRoot := os.Getenv("SystemRoot")
-		return []string{
+		environment = []string{
 			"SystemRoot=" + systemRoot,
 			"PATH=" + filepath.Join(systemRoot, "System32"),
 			"HOME=" + root,
 			"TEMP=" + root,
 			"TMP=" + root,
 		}
+	} else {
+		environment = []string{"PATH=/usr/bin:/bin", "HOME=" + root, "TMPDIR=" + root}
 	}
-	return []string{"PATH=/usr/bin:/bin", "HOME=" + root, "TMPDIR=" + root}
+	return environment
 }
 
 type modelListRequest struct {
@@ -309,10 +314,8 @@ func assertHostMetadataPreserved(t *testing.T, baseline, patched map[string]any)
 		"supports_search_tool": {},
 	}
 	for name, value := range baseline {
-		if _, changedByConfig := pluginManagedFields[name]; changedByConfig {
-			continue
-		}
-		if name == "model_messages" {
+		_, changedByConfig := pluginManagedFields[name]
+		if !changedByConfig && name == "model_messages" {
 			baselineMessages, ok := value.(map[string]any)
 			if !ok {
 				t.Fatalf("baseline model_messages is %T, want object", value)
@@ -322,18 +325,20 @@ func assertHostMetadataPreserved(t *testing.T, baseline, patched map[string]any)
 				t.Fatalf("patched model_messages is %T, want object", patched[name])
 			}
 			for messageName, messageValue := range baselineMessages {
-				if messageName == "tools" {
-					continue
-				}
-				if got, exists := patchedMessages[messageName]; !exists || !reflect.DeepEqual(got, messageValue) {
-					t.Fatalf("host model_messages.%s changed: got %#v, want %#v", messageName, got, messageValue)
+				if messageName != "tools" {
+					assertUnchangedHostField(t, patchedMessages, messageName, messageValue)
 				}
 			}
-			continue
+		} else if !changedByConfig {
+			assertUnchangedHostField(t, patched, name, value)
 		}
-		if got, exists := patched[name]; !exists || !reflect.DeepEqual(got, value) {
-			t.Fatalf("host model field %q changed: got %#v, want %#v", name, got, value)
-		}
+	}
+}
+
+func assertUnchangedHostField(t *testing.T, patched map[string]any, name string, expected any) {
+	t.Helper()
+	if got, exists := patched[name]; !exists || !reflect.DeepEqual(got, expected) {
+		t.Fatalf("host field %q changed: got %#v, want %#v", name, got, expected)
 	}
 }
 
@@ -347,11 +352,10 @@ func assertModelCollection(t *testing.T, response map[string]any, expected model
 }
 
 func containsModel(models []any, id string) bool {
-	for _, value := range models {
-		model, ok := value.(map[string]any)
-		if ok && model["slug"] == id {
-			return true
-		}
+	found := false
+	for index := 0; index < len(models) && !found; index++ {
+		model, ok := models[index].(map[string]any)
+		found = ok && model["slug"] == id
 	}
-	return false
+	return found
 }

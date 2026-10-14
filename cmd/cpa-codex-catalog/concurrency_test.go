@@ -54,8 +54,9 @@ func TestResponseInterceptorConcurrentConfigurationSnapshots(t *testing.T) {
 		model := catalog.Models[0]
 		if _, ok := validPairs[[2]string{model.DisplayName, model.Description}]; !ok {
 			return fmt.Errorf("observed model fields (%q, %q) do not match a complete valid snapshot", model.DisplayName, model.Description)
+		} else {
+			return nil
 		}
-		return nil
 	}
 	observations := make(chan chan error)
 	observerDone := make(chan struct{})
