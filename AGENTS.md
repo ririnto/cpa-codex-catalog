@@ -24,6 +24,9 @@
 - Stop discovery when evidence resolves the implementation decision.
 - Reproduce defects with synthetic inputs and fix the demonstrated cause.
 - Remove superseded interfaces and update their consumers together.
+- Prefer condition inversion, flat if/else chains, and explicit loop conditions over successful mid-function exits.
+- Preserve natural final returns and required failure propagation without adding flags or deeper nesting.
+- Follow existing lint rules and formatter output when they conflict with control-flow preferences.
 - Encode recurring mistakes in existing checks before adding more instructions.
 - Prove new checks reject representative invalid inputs and accept valid inputs.
 - Run checks on the same boundary that demonstrated the defect.

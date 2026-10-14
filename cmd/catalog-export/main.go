@@ -57,25 +57,21 @@ func rejectInputOutputAliases(outPath string, inputPaths ...string) error {
 		return errors.New("unable to inspect export path")
 	}
 	for _, inputPath := range inputPaths {
-		if inputPath == "" {
-			continue
-		}
-		absoluteInputPath, err := cleanAbsolutePath(inputPath)
-		if err != nil {
-			return errors.New("unable to resolve input path")
-		}
-		if outputPath == absoluteInputPath {
-			return errors.New("output path aliases an input")
-		}
-		inputInfo, inputErr := os.Stat(absoluteInputPath)
-		if inputErr != nil {
-			if errors.Is(inputErr, os.ErrNotExist) {
-				continue
+		if inputPath != "" {
+			absoluteInputPath, err := cleanAbsolutePath(inputPath)
+			if err != nil {
+				return errors.New("unable to resolve input path")
 			}
-			return errors.New("unable to inspect input path")
-		}
-		if outputErr == nil && os.SameFile(outputInfo, inputInfo) {
-			return errors.New("output path aliases an input")
+			if outputPath == absoluteInputPath {
+				return errors.New("output path aliases an input")
+			}
+			inputInfo, inputErr := os.Stat(absoluteInputPath)
+			if inputErr != nil && !errors.Is(inputErr, os.ErrNotExist) {
+				return errors.New("unable to inspect input path")
+			}
+			if inputErr == nil && outputErr == nil && os.SameFile(outputInfo, inputInfo) {
+				return errors.New("output path aliases an input")
+			}
 		}
 	}
 	return nil
@@ -85,8 +81,9 @@ func cleanAbsolutePath(path string) (string, error) {
 	absolutePath, err := filepath.Abs(path)
 	if err != nil {
 		return "", err
+	} else {
+		return filepath.Clean(absolutePath), nil
 	}
-	return filepath.Clean(absolutePath), nil
 }
 
 func writeExport(outPath string, data []byte, force bool) error {
@@ -120,9 +117,7 @@ func writeExport(outPath string, data []byte, force bool) error {
 		if err := os.Rename(temporaryPath, outPath); err != nil {
 			return errors.New("unable to replace export")
 		}
-		return nil
-	}
-	if err := os.Link(temporaryPath, outPath); err != nil {
+	} else if err := os.Link(temporaryPath, outPath); err != nil {
 		return errors.New("output exists or cannot be created")
 	}
 	return nil

@@ -191,26 +191,24 @@ func successEnvelope(result any) ([]byte, error) {
 	resultBytes, err := json.Marshal(result)
 	if err != nil {
 		return errorEnvelope("plugin_error", "plugin request failed", http.StatusInternalServerError), nil
+	} else {
+		return json.Marshal(pluginabi.Envelope{OK: true, Result: resultBytes})
 	}
-	return json.Marshal(pluginabi.Envelope{OK: true, Result: resultBytes})
 }
 
 func errorEnvelope(code, message string, status int) []byte {
 	result, err := pluginabi.NewErrorEnvelope(code, message, status)
 	if err != nil {
 		return []byte("{\"ok\":false,\"error\":{\"code\":\"plugin_error\",\"message\":\"plugin request failed\"}}")
+	} else {
+		return result
 	}
-	return result
 }
 
 func writeResponse(response *C.cliproxy_buffer, data []byte) {
-	if response == nil {
-		return
+	if response != nil && len(data) != 0 {
+		buffer := C.CBytes(data)
+		response.ptr = buffer
+		response.len = C.size_t(len(data))
 	}
-	if len(data) == 0 {
-		return
-	}
-	buffer := C.CBytes(data)
-	response.ptr = buffer
-	response.len = C.size_t(len(data))
 }

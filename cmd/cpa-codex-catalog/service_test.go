@@ -367,24 +367,19 @@ func codexListRequest(body []byte) pluginapi.ResponseInterceptRequest {
 
 func equalStrings(value any, expected []string) bool {
 	values, ok := value.([]any)
-	if !ok || len(values) != len(expected) {
-		return false
+	equal := ok && len(values) == len(expected)
+	for index := 0; index < len(values) && equal; index++ {
+		equal = values[index] == expected[index]
 	}
-	for index, item := range values {
-		if item != expected[index] {
-			return false
-		}
-	}
-	return true
+	return equal
 }
 
 func containsString(values []string, expected string) bool {
-	for _, value := range values {
-		if value == expected {
-			return true
-		}
+	index := 0
+	for index < len(values) && values[index] != expected {
+		index++
 	}
-	return false
+	return index < len(values)
 }
 
 func readSyntheticSeed(t *testing.T, directory, name string) []byte {

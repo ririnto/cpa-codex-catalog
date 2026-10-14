@@ -77,8 +77,9 @@ func parseConfig(raw []byte) (configFile, error) {
 	var trailing any
 	if err := decoder.Decode(&trailing); err != io.EOF {
 		return configFile{}, errors.New("multiple configuration documents")
+	} else {
+		return config, nil
 	}
-	return config, nil
 }
 
 func currentRegistration() registration {
@@ -105,35 +106,36 @@ func currentRegistration() registration {
 // It clears Content-Length and ETag only when the body changes, and returns patching errors without a partial response.
 func (s *pluginService) InterceptResponse(_ context.Context, request pluginapi.ResponseInterceptRequest) (pluginapi.ResponseInterceptResponse, error) {
 	passThrough := pluginapi.ResponseInterceptResponse{Headers: request.ResponseHeaders, Body: request.Body}
-	if request.StatusCode != http.StatusOK || request.Stream || request.SourceFormat != "openai" || request.Model != "" || request.RequestedModel != "" || len(request.RequestBody) != 0 || len(request.OriginalRequest) != 0 {
-		return passThrough, nil
+	var snapshot *serviceSnapshot
+	if request.StatusCode == http.StatusOK && !request.Stream && request.SourceFormat == "openai" && request.Model == "" && request.RequestedModel == "" && len(request.RequestBody) == 0 && len(request.OriginalRequest) == 0 {
+		snapshot = s.current.Load()
 	}
-	snapshot := s.current.Load()
-	if snapshot == nil || !snapshot.enabled {
-		return passThrough, nil
+	var err error
+	if snapshot != nil && snapshot.enabled {
+		passThrough, err = patchResponse(request, snapshot.overrides, passThrough)
 	}
-	patched, isCodexCatalog, err := catalog.PatchGeneratedResponse(request.Body, snapshot.overrides)
-	if err != nil || !isCodexCatalog || len(patched) == 0 {
-		return passThrough, err
+	return passThrough, err
+}
+
+func patchResponse(request pluginapi.ResponseInterceptRequest, overrides []byte, response pluginapi.ResponseInterceptResponse) (pluginapi.ResponseInterceptResponse, error) {
+	patched, isCodexCatalog, err := catalog.PatchGeneratedResponse(request.Body, overrides)
+	if err != nil {
+		return response, err
 	}
-	if bytes.Equal(patched, request.Body) {
-		return passThrough, nil
+	if isCodexCatalog && len(patched) != 0 && !bytes.Equal(patched, request.Body) {
+		response.Headers = headersWithout(request.ResponseHeaders, "Content-Length", "ETag")
+		response.Body = patched
+		response.ClearHeaders = []string{"Content-Length", "ETag"}
 	}
-	passThrough.Headers = headersWithout(request.ResponseHeaders, "Content-Length", "ETag")
-	passThrough.Body = patched
-	passThrough.ClearHeaders = []string{"Content-Length", "ETag"}
-	return passThrough, nil
+	return response, nil
 }
 
 func headersWithout(headers http.Header, excluded ...string) http.Header {
 	filtered := make(http.Header, len(headers))
 	for name, values := range headers {
 		remove := false
-		for _, excludedName := range excluded {
-			if strings.EqualFold(name, excludedName) {
-				remove = true
-				break
-			}
+		for index := 0; index < len(excluded) && !remove; index++ {
+			remove = strings.EqualFold(name, excluded[index])
 		}
 		if !remove {
 			filtered[name] = append([]string(nil), values...)

@@ -70,16 +70,19 @@ const proseBlocks = (tokens: readonly MicromarkToken[]): MicromarkToken[] => {
   const visit = (token: MicromarkToken) => {
     if (token.type === "paragraph") {
       blocks.push(token);
-      return;
     }
-    if (
+    const children =
+      token.type === "paragraph" ||
       skippedContainerTypes.has(token.type) ||
       (token.type === "blockQuote" && !alertPattern.test(token.text))
+        ? undefined
+        : token.children.values();
+    for (
+      let step = children?.next();
+      step !== undefined && !step.done;
+      step = children?.next()
     ) {
-      return;
-    }
-    for (const child of token.children) {
-      visit(child);
+      visit(step.value);
     }
   };
   for (const token of tokens) {
@@ -176,13 +179,13 @@ const continuation = (
   line: string
 ): Finding | undefined => {
   const start = line.trimStart();
-  if (
+  return (
     previous &&
     /[a-z0-9]$/iu.test(previous.trimEnd()) &&
     (/^[a-z]/u.test(start) || imperativeContinuationPattern.test(start))
-  ) {
-    return { column: line.length - start.length + 1, length: 1 };
-  }
+  )
+    ? { column: line.length - start.length + 1, length: 1 }
+    : undefined;
 };
 
 /**
@@ -197,7 +200,11 @@ const nameInitial = (before: string, remainder: string): boolean =>
  * Finds a terminator that ends one independent sentence and starts another.
  */
 const joinedSentence = (line: string): Finding | undefined => {
-  for (const match of line.matchAll(terminatorPattern)) {
+  const matches = line.matchAll(terminatorPattern);
+  let finding: Finding | undefined;
+  let step = matches.next();
+  while (!step.done && finding === undefined) {
+    const match = step.value;
     const index = match.index ?? 0;
     const after = line.slice(index + 1).replace(closingQuotePattern, "");
     const [next] = after;
@@ -211,16 +218,23 @@ const joinedSentence = (line: string): Finding | undefined => {
       remainder !== "" &&
       sentenceStartPattern.test(remainder)
     ) {
-      return { column: index + 1, length: 1 };
+      finding = { column: index + 1, length: 1 };
+    } else {
+      step = matches.next();
     }
   }
+  return finding;
 };
 
 /**
  * Finds a semicolon used to join independent prose on one line.
  */
 const joinedSemicolon = (line: string): Finding | undefined => {
-  for (const match of line.matchAll(semicolonPattern)) {
+  const matches = line.matchAll(semicolonPattern);
+  let finding: Finding | undefined;
+  let step = matches.next();
+  while (!step.done && finding === undefined) {
+    const match = step.value;
     const index = match.index ?? 0;
     const before = line.slice(0, index);
     const tail = line.slice(index + 1).trimStart();
@@ -239,10 +253,14 @@ const joinedSemicolon = (line: string): Finding | undefined => {
         conjunctiveAdverbPattern.test(tail) ||
         lowercaseClauseStartPattern.test(tail);
       if (independent) {
-        return { column: index + 1, length: [...match[0]].length };
+        finding = { column: index + 1, length: [...match[0]].length };
       }
     }
+    if (finding === undefined) {
+      step = matches.next();
+    }
   }
+  return finding;
 };
 
 /**
@@ -251,12 +269,17 @@ const joinedSemicolon = (line: string): Finding | undefined => {
 const rule: Rule = {
   description: "Prose sentences must be separated by physical source lines",
   function: (params, onError) => {
-    if (protectedDocument(params)) {
-      return;
-    }
-    const tokens = params.parsers.micromark?.tokens ?? [];
-    const reported = new Set<string>();
-    for (const paragraph of proseBlocks(tokens)) {
+    const paragraphs = protectedDocument(params)
+      ? undefined
+      : proseBlocks(params.parsers.micromark?.tokens ?? []);
+    const reported = paragraphs === undefined ? undefined : new Set<string>();
+    const blocks = paragraphs?.values();
+    for (
+      let step = blocks?.next();
+      step !== undefined && !step.done;
+      step = blocks?.next()
+    ) {
+      const paragraph = step.value;
       const sourceLines = [...segmentsByLine(paragraph)];
       const protectedLines = protectText(
         sourceLines.map(([, segments]) => rebuildLine(segments)).join("\n")
@@ -283,8 +306,8 @@ const rule: Rule = {
         ] as const) {
           if (finding) {
             const key = `${lineNumber}:${kind}`;
-            if (!reported.has(key)) {
-              reported.add(key);
+            if (!reported?.has(key)) {
+              reported?.add(key);
               onError({
                 context: (params.lines[lineNumber - 1] ?? "").trim(),
                 detail:
