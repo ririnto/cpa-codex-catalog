@@ -3,6 +3,28 @@
 Use Go 1.26.9 or newer in the Go 1.26 toolchain and the Taskfile tasks declared by this repository.
 The Go tool directive lets you invoke the pinned Task and govulncheck versions with `go tool`.
 
+Use Node.js 24 LTS and the pnpm version declared in `package.json` for contributor tooling.
+Install the locked dependencies and Git hooks from the repository root.
+
+```sh
+pnpm install --frozen-lockfile
+pnpm run check
+pnpm run fix
+```
+
+The root scripts compose Markdownlint with the existing Go Taskfile.
+`pnpm run check` runs both Markdown and complete native verification.
+`pnpm run fix` applies Markdown fixes and Go formatting.
+The Markdown checks enforce compact tables and the applicable Sinon Harness prose rules.
+Review prose diagnostics manually because sentence recognition has bounded coverage.
+Keep each sentence on its own source line and avoid semicolon joins and em dashes.
+
+Dependency installation runs Husky's preparation step for this clone.
+The pre-commit hook invokes `pnpm run pre-commit`.
+The pre-push hook invokes `pnpm run pre-push`.
+Both scripts run all checks and propagate failures to Git.
+Keep existing hook owners when composing future hooks.
+
 Run the focused task for the files you change.
 
 ```sh
@@ -64,9 +86,12 @@ Describe the problem, changed behavior or documentation, checks, and material li
 Distinguish passing checks, failures, blocked checks, and checks not run.
 Reuse passing evidence only while relevant behavior, inputs, configuration, and tools remain unchanged.
 Review the entire posted change independently before merging.
+If the required independent context cannot read its assignment, record the transport failure and follow explicit delivery authority.
+Review the complete current posted diff yourself only when that fallback is authorized.
 Follow current branch protections and required checks without bypassing them.
 After merging, verify the named base branch and close the resolved issue.
 Remove task-owned branches and temporary files only after checking reachability and recovery needs.
+Check active processes and handles before deleting task-owned build or verification resources.
 
 ## Commit messages
 

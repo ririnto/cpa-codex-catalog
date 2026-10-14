@@ -1,0 +1,26 @@
+{
+  "devDependencies": {
+    "husky": "9.1.7",
+    "markdownlint": "0.41.1",
+    "markdownlint-cli2": "0.23.3",
+    "npm-run-all2": "9.0.3"
+  },
+  "engines": {
+    "node": ">=24.15.0 <25"
+  },
+  "name": "cpa-codex-catalog",
+  "packageManager": "pnpm@12.11.2",
+  "private": true,
+  "scripts": {
+    "check": "run-p check:*",
+    "check:go": "go tool task check",
+    "check:markdownlint-cli2": "markdownlint-cli2",
+    "fix": "run-p fix:*",
+    "fix:go": "go tool task fmt",
+    "fix:markdownlint-cli2": "markdownlint-cli2 --fix",
+    "pre-commit": "run-s check",
+    "pre-push": "run-s check",
+    "prepare": "husky"
+  },
+  "type": "module"
+}

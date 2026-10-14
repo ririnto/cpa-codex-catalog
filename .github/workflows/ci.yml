@@ -24,7 +24,13 @@ jobs:
           go-version-file: go.mod
           cache: false
 
+      - name: Set up pnpm and Node.js LTS
+        uses: pnpm/setup@v3.1.1
+        with:
+          require-lockfile: true
+          runtime: node@24
+
       - name: Verify and test offline native integration
         env:
           CGO_ENABLED: "1"
-        run: go tool task check
+        run: pnpm run check

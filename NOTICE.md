@@ -5,3 +5,5 @@ Its buffer handling follows the MIT-licensed Copilot plugin [v0.3.3](https://git
 The original MIT license remains in LICENSE.
 Catalog validation, metadata merging, and local export are implemented in this repository.
 Authentication for the intercepted model route is provided by the CLIProxyAPI host.
+The Markdown rules in `rules/` come from the MIT-licensed [Sinon Harness tooling](https://github.com/ririnto/sinon/tree/main/plugins/harness/tooling/pnpm/rules).
+Their license is preserved in `rules/LICENSE`.
