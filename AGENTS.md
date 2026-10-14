@@ -15,11 +15,26 @@
 
 - Keep the native plugin compatible with the CLIProxyAPI SDK release pinned in `go.mod`.
 - Use the existing Taskfile and `go tool task`.
-- Do not add another task runner.
+- Keep native Go tasks in the Taskfile and compose them through the root pnpm scripts.
+- Keep the shared Markdown checks aligned with the applicable Sinon Harness tooling baseline.
+
+## Development lifecycle
+
+- Define the observable outcome and affected contracts before implementation.
+- Stop discovery when evidence resolves the implementation decision.
+- Reproduce defects with synthetic inputs and fix the demonstrated cause.
+- Remove superseded interfaces and update their consumers together.
+- Encode recurring mistakes in existing checks before adding more instructions.
+- Prove new checks reject representative invalid inputs and accept valid inputs.
+- Run checks on the same boundary that demonstrated the defect.
+- Keep native integration evidence separate from live provider or installed-host acceptance.
+
+These rules apply the relevant [pstack lifecycle principles](https://github.com/cursor/plugins/tree/main/pstack).
 
 ## Verification
 
-- Use focused tests for each changed behavior and run `go tool task check` before delivery.
+- Use focused tests for each changed behavior and run `pnpm run check` before delivery.
+- Keep `go tool task check` as the complete native verification owner.
 - Keep tests offline and use mock upstreams for host integration.
 - Report the exact checks run and any unavailable host evidence.
 
