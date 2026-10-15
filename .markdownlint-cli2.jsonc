@@ -13,16 +13,8 @@
     },
     "no-emphasis-as-heading": true,
     "no-inline-html": {
-      "allowed_elements": [
-        "details",
-        "summary",
-        "kbd",
-        "img",
-        "code"
-      ],
-      "table_allowed_elements": [
-        "br"
-      ]
+      "allowed_elements": ["details", "summary", "kbd", "img", "code"],
+      "table_allowed_elements": ["br"]
     },
     "table-column-style": {
       "style": "compact"
@@ -34,7 +26,5 @@
     "./rules/table-separators.ts"
   ],
   "gitignore": true,
-  "globs": [
-    "**/*.md"
-  ]
+  "globs": ["**/*.md"]
 }

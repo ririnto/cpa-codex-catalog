@@ -16,12 +16,16 @@ pnpm run check
 pnpm run fix
 ```
 
-The root scripts compose Markdownlint with the existing Go Taskfile.
-`pnpm run check` runs both Markdown and complete native verification.
-`pnpm run fix` applies Markdown fixes and Go formatting.
-The Markdown checks enforce compact tables and the applicable Sinon Harness prose rules.
+The root scripts compose TypeScript, Ultracite, Markdownlint, and the existing Go Taskfile checks.
+`pnpm run check` runs the complete native verification and the focused TypeScript, lint-rule, and tooling checks.
+`pnpm run fix` applies Markdownlint fixes, Ultracite formatting, and Go formatting.
+The Markdown checks enforce compact tables and the repository's sentence, table-separator, and box-drawing rules.
 Review prose diagnostics manually because sentence recognition has bounded coverage.
 Keep each sentence on its own source line and avoid semicolon joins and em dashes.
+Run `pnpm run check:lint-rules` to test custom Markdown rule behavior with synthetic input.
+Run `pnpm run check:typescript` to type-check the custom rules and tooling configurations.
+Run `pnpm run check:ultracite` and `pnpm run fix:ultracite` for JavaScript and TypeScript linting and formatting.
+Ultracite is the only configured caller of Oxlint and Oxfmt.
 
 Keep the `prepare` script invoking Husky so dependency installation prepares real Git hooks for this clone.
 The pre-commit hook invokes `pnpm run pre-commit`.
@@ -33,8 +37,8 @@ Keep lint rules and configuration intact without suppressions or disabled rules.
 
 ## Dependency security overrides
 
-`markdownlint-cli2>smol-toml` requires `^1.9.0` to fix [GHSA-r4xh-jqrq-34v2](https://github.com/advisories/GHSA-r4xh-jqrq-34v2).
-`markdownlint>micromark-extension-math>katex` requires `^0.18.2` to fix [GHSA-238p-pmpm-9mq7](https://github.com/advisories/GHSA-238p-pmpm-9mq7).
+`markdownlint-cli2>smol-toml` uses `^1.9.1` to fix [GHSA-r4xh-jqrq-34v2](https://github.com/advisories/GHSA-r4xh-jqrq-34v2).
+`micromark-extension-math>katex` uses `^0.19.0` to fix [GHSA-238p-pmpm-9mq7](https://github.com/advisories/GHSA-238p-pmpm-9mq7).
 Remove each override when the upstream dependency constraints require a patched release and the lockfile resolves it.
 
 ## Native verification

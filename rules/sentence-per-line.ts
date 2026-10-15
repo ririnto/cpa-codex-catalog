@@ -179,11 +179,9 @@ const continuation = (
   line: string
 ): Finding | undefined => {
   const start = line.trimStart();
-  return (
-    previous &&
+  return previous &&
     /[a-z0-9]$/iu.test(previous.trimEnd()) &&
     (/^[a-z]/u.test(start) || imperativeContinuationPattern.test(start))
-  )
     ? { column: line.length - start.length + 1, length: 1 }
     : undefined;
 };
@@ -263,62 +261,74 @@ const joinedSemicolon = (line: string): Finding | undefined => {
   return finding;
 };
 
+const inspectLine = (
+  params: RuleParams,
+  onError: Parameters<Rule["function"]>[1],
+  reported: Set<string>,
+  lineNumber: number,
+  line: string,
+  previousLine: string | undefined
+): void => {
+  const continuationFinding = continuation(previousLine, line);
+  if (continuationFinding) {
+    onError({
+      context: (params.lines[lineNumber - 1] ?? "").trim(),
+      detail: /^[a-z]/u.test(line.trimStart())
+        ? "Sentence continues from the previous source line; keep the sentence on one line."
+        : "End the previous instruction with a sentence terminator before this continuation.",
+      lineNumber,
+      range: [continuationFinding.column, continuationFinding.length]
+    });
+  }
+  for (const [kind, finding] of [
+    ["sentences", joinedSentence(line)],
+    ["semicolon", joinedSemicolon(line)]
+  ] as const) {
+    if (finding) {
+      const key = `${lineNumber}:${kind}`;
+      if (!reported.has(key)) {
+        reported.add(key);
+        onError({
+          context: (params.lines[lineNumber - 1] ?? "").trim(),
+          detail:
+            kind === "sentences"
+              ? "Multiple sentences on one line; put each sentence on its own line."
+              : "Semicolon-joined sentences on one line; put each sentence on its own line.",
+          lineNumber,
+          range: [finding.column, finding.length]
+        });
+      }
+    }
+  }
+};
+
 /**
  * Markdownlint rule requiring one prose sentence per source line.
  */
 const rule: Rule = {
   description: "Prose sentences must be separated by physical source lines",
   function: (params, onError) => {
-    const paragraphs = protectedDocument(params)
-      ? undefined
-      : proseBlocks(params.parsers.micromark?.tokens ?? []);
-    const reported = paragraphs === undefined ? undefined : new Set<string>();
-    const blocks = paragraphs?.values();
-    for (
-      let step = blocks?.next();
-      step !== undefined && !step.done;
-      step = blocks?.next()
-    ) {
-      const paragraph = step.value;
-      const sourceLines = [...segmentsByLine(paragraph)];
-      const protectedLines = protectText(
-        sourceLines.map(([, segments]) => rebuildLine(segments)).join("\n")
-      ).split("\n");
-      for (const [index, [lineNumber]] of sourceLines.entries()) {
-        const line = protectedLines[index] ?? "";
-        const continuationFinding =
-          sourceLines[index - 1]?.[0] === lineNumber - 1
-            ? continuation(protectedLines[index - 1], line)
-            : undefined;
-        if (continuationFinding) {
-          onError({
-            context: (params.lines[lineNumber - 1] ?? "").trim(),
-            detail: /^[a-z]/u.test(line.trimStart())
-              ? "Sentence continues from the previous source line; keep the sentence on one line."
-              : "End the previous instruction with a sentence terminator before this continuation.",
+    if (!protectedDocument(params)) {
+      const reported = new Set<string>();
+      const paragraphs = proseBlocks(params.parsers.micromark?.tokens ?? []);
+      for (const paragraph of paragraphs) {
+        const sourceLines = [...segmentsByLine(paragraph)];
+        const protectedLines = protectText(
+          sourceLines.map(([, segments]) => rebuildLine(segments)).join("\n")
+        ).split("\n");
+        for (const [index, [lineNumber]] of sourceLines.entries()) {
+          const previousLine =
+            sourceLines[index - 1]?.[0] === lineNumber - 1
+              ? protectedLines[index - 1]
+              : undefined;
+          inspectLine(
+            params,
+            onError,
+            reported,
             lineNumber,
-            range: [continuationFinding.column, continuationFinding.length]
-          });
-        }
-        for (const [kind, finding] of [
-          ["sentences", joinedSentence(line)],
-          ["semicolon", joinedSemicolon(line)]
-        ] as const) {
-          if (finding) {
-            const key = `${lineNumber}:${kind}`;
-            if (!reported?.has(key)) {
-              reported?.add(key);
-              onError({
-                context: (params.lines[lineNumber - 1] ?? "").trim(),
-                detail:
-                  kind === "sentences"
-                    ? "Multiple sentences on one line; put each sentence on its own line."
-                    : "Semicolon-joined sentences on one line; put each sentence on its own line.",
-                lineNumber,
-                range: [finding.column, finding.length]
-              });
-            }
-          }
+            protectedLines[index] ?? "",
+            previousLine
+          );
         }
       }
     }

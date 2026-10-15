@@ -7,11 +7,11 @@
     "model_messages": {
       "tools": {
         "multi_agent": {
-          "spawn_agent": {"description": "Default tool description"}
+          "spawn_agent": { "description": "Default tool description" }
         }
       }
     },
-    "future_metadata": {"shared": true}
+    "future_metadata": { "shared": true }
   },
   "models": {
     "codex-fixture-model": {
@@ -19,12 +19,12 @@
       "model_messages": {
         "tools": {
           "multi_agent": {
-            "spawn_agent": {"parameters": "Model parameters"}
+            "spawn_agent": { "parameters": "Model parameters" }
           }
         }
       },
-      "future_metadata": {"source": "fixture"}
+      "future_metadata": { "source": "fixture" }
     },
-    "dormant-model": {"display_name": "Dormant model"}
+    "dormant-model": { "display_name": "Dormant model" }
   }
 }
