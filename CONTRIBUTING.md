@@ -4,6 +4,10 @@ Use Go 1.26.9 or newer in the Go 1.26 toolchain and the Taskfile tasks declared 
 The Go tool directive lets you invoke the pinned Task and govulncheck versions with `go tool`.
 
 Use Node.js 24 LTS and the pnpm version declared in `package.json` for contributor tooling.
+Prefer supported LTS releases when selecting toolchains and dependencies, or stable releases when no LTS line exists.
+Define pnpm dependency versions as `^x.y.z` ranges in `pnpm-workspace.yaml` and reference them with `catalog:`.
+Use overrides only for necessary security fixes and document the advisory, affected dependency path, and removal condition.
+Do not add version-plus-hash pins or remove lockfile integrity checks.
 Install the locked dependencies and Git hooks from the repository root.
 
 ```sh
@@ -19,11 +23,21 @@ The Markdown checks enforce compact tables and the applicable Sinon Harness pros
 Review prose diagnostics manually because sentence recognition has bounded coverage.
 Keep each sentence on its own source line and avoid semicolon joins and em dashes.
 
-Dependency installation runs Husky's preparation step for this clone.
+Keep the `prepare` script invoking Husky so dependency installation prepares real Git hooks for this clone.
 The pre-commit hook invokes `pnpm run pre-commit`.
 The pre-push hook invokes `pnpm run pre-push`.
 Both scripts run all checks and propagate failures to Git.
 Keep existing hook owners when composing future hooks.
+Invoke Oxlint and Oxfmt only through Ultracite when JavaScript or TypeScript linting or formatting is needed.
+Keep lint rules and configuration intact without suppressions or disabled rules.
+
+## Dependency security overrides
+
+`markdownlint-cli2>smol-toml` requires `^1.9.0` to fix [GHSA-r4xh-jqrq-34v2](https://github.com/advisories/GHSA-r4xh-jqrq-34v2).
+`markdownlint>micromark-extension-math>katex` requires `^0.18.2` to fix [GHSA-238p-pmpm-9mq7](https://github.com/advisories/GHSA-238p-pmpm-9mq7).
+Remove each override when the upstream dependency constraints require a patched release and the lockfile resolves it.
+
+## Native verification
 
 Run the focused task for the files you change.
 
@@ -56,6 +70,8 @@ The runner fails if the sandbox tool or profile is unavailable.
 The host uses its embedded catalogs and disables remote catalog updates.
 
 Keep tests offline and use disposable synthetic fixtures.
+Assert behavior and contracts without hard-pinning prose wording in tests.
+Use documentation comments only, preserving language directives and other required semantic comments.
 Do not use real Codex accounts, provider credentials, live model caches, or production endpoints in tests.
 Do not commit generated plugin binaries, local configuration, catalogs, tokens, or machine-specific paths.
 
