@@ -8,11 +8,11 @@
       "support_verbosity": false,
       "priority": 1,
       "supported_reasoning_levels": [
-        {"effort": "low", "description": "Light"},
-        {"effort": "high", "description": "Deep"}
+        { "effort": "low", "description": "Light" },
+        { "effort": "high", "description": "Deep" }
       ],
       "experimental_supported_tools": [],
-      "truncation_policy": {"mode": "tokens", "limit": 8192},
+      "truncation_policy": { "mode": "tokens", "limit": 8192 },
       "shell_type": "shell_command",
       "visibility": "list",
       "model_messages": {
@@ -23,7 +23,7 @@
               "description": "Default tool description",
               "parameters": "Model parameters"
             },
-            "send_message": {"description": "Preserved tool"}
+            "send_message": { "description": "Preserved tool" }
           }
         }
       },

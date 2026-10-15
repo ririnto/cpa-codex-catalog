@@ -1,4 +1,4 @@
-version: '3'
+version: "3"
 
 vars:
   VERSION: '{{.VERSION | default "dev"}}'
@@ -7,7 +7,7 @@ vars:
   GOARCH:
     sh: go env GOARCH
   EXT: '{{if eq .GOOS "darwin"}}dylib{{else if eq .GOOS "windows"}}dll{{else}}so{{end}}'
-  ARTIFACT: 'build/plugins/{{.GOOS}}/{{.GOARCH}}/cpa-codex-catalog.{{.EXT}}'
+  ARTIFACT: "build/plugins/{{.GOOS}}/{{.GOARCH}}/cpa-codex-catalog.{{.EXT}}"
 
 tasks:
   fmt:
@@ -49,7 +49,7 @@ tasks:
   build:
     desc: Build the native shared library for the current platform
     env:
-      CGO_ENABLED: '1'
+      CGO_ENABLED: "1"
     cmds:
       - mkdir -p 'build/plugins/{{.GOOS}}/{{.GOARCH}}'
       - go build -mod=readonly -trimpath -buildvcs=false -buildmode=c-shared -ldflags '-X main.pluginVersion={{.VERSION}}' -o '{{.ARTIFACT}}' ./cmd/cpa-codex-catalog
